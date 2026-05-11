@@ -1,0 +1,38 @@
+﻿Detailed Technical Prompt for CLAUDE CODE: Mobile POS System Development
+Project OverviewBuild a modular, offline-first Mobile Point of Sale (POS) application designed as an integrated business management tool 1, 2. The app must handle high-concurrency transactions, real-time inventory tracking, and complex sales analytics while remaining fully functional without an internet connection 3-5.
+1. Core Architecture & Tech Stack
+* Architecture Pattern: Use a layered architecture consisting of a Service Worker (intercepting requests), IndexedDB for local persistence, an Offline API Client, and Web Workers for background synchronization 6.
+* State Management: Implement a three-state machine to represent IN_ONLINE_MODE, IN_OFFLINE_MODE, and IN_TRANSITIONING (to represent syncing backlogs) 7.
+* Offline Logic: Use optimistic local writes where transactions are confirmed to the user immediately, while syncing to the cloud backend occurs as a background concern 8.
+* Tech Stack: React Native or Flutter for the frontend, PostgreSQL for the cloud database, and Node.js for the backend API 5, 9.
+2. Database Schema (RDBMS)
+Design a relational schema with the following core entities and relationships 10, 11:
+* Products & Categories: One-to-many relationship; products must include fields for marked price, effective price, and tax (GST) 12, 13.
+* Transactions & Transaction Items: Normalized tables to track individual sales; include an is_sync_online boolean and a unique offline_session_hash for correlation 11, 14, 15.
+* Inventory: Real-time stock levels with database triggers to automatically deduct items upon transaction completion 9, 16.
+* Customers: Profiles including purchase history and loyalty points 16, 17.
+* Employees: Support for separate user personas (Cashier, Manager) with role-based access control 18, 19.
+3. Key Feature Specifications
+* Transaction Processing: Support multiple payment types (Cash, Card, Mobile); implement conversational ordering where items can be added in any sequence the customer speaks them 20, 21.
+* Inventory Management: Real-time tracking with low-stock alerts and support for batch/expiry tracking 16, 22.
+* Reporting & Analytics: A dashboard providing at-a-glance insights into daily sales, top-selling products, and employee performance 22, 23.
+* Catalog Search: Implement a fast, local search using Fuse.js to handle typos during high-pressure checkout shifts 24, 25.
+* Security: Use BiometricPrompt API (Fingerprint/Face Unlock) as the default authentication 26. All receipts must mask the Primary Account Number (PAN) 27.
+4. UI/UX Architecture & Design Style
+* Design System: Follow Material Design 3 (M3) using dynamic color tokens and tonal elevation instead of harsh shadows 28-30.
+* Responsiveness: Use adaptive layouts (WindowSizeClass) to provide a two-pane experience on tablets and foldables, avoiding stretched phone UIs 29, 31.
+* Accessibility: Ensure all body text is a minimum of 16sp with a 1.5x line height; buttons must be fat-finger friendly (large targets) 32-34.
+* Performance: Use skeleton screens (shimmering shapes) during data loading instead of spinners to improve perceived speed 35, 36.
+* Navigation: Use a bottom navigation bar for modern thumb-reachability on large devices 37.
+5. Security & Compliance Requirements
+* PCI Compliance: The app must not permit direct PIN entry into the mobile device; PIN entry must occur via approved external hardware 38, 39.
+* Data Protection: Use EncryptedSharedPreferences or the Android Keystore for local sensitive data 40.
+* Integrity Checks: The app should refuse to run on rooted or jailbroken devices to prevent malware access to transaction data 41, 42.
+* Audit Logging: Log all user access, permission changes, and transaction voids for administrative review 43, 44.
+6. End-to-End User Flow
+1. Authentication: User opens the app and authenticates via Biometrics 26.
+2. Dashboard: User sees daily revenue totals and any low-stock alerts 22.
+3. Checkout: Cashier adds items via barcode scan or Fuse.js search. Cart recomputes taxes and discounts locally 12, 20.
+4. Payment: User selects payment method. If offline, the app accepts Cash and marks the record for future sync 45.
+5. Receipt: App generates a secure, masked receipt (sent via SMS/Email or printed) 27.
+6. Sync: As soon as the network returns, the Order Sync Web Worker pushes backlog data to the cloud using the offline_session_hash as a correlation key 15, 46.

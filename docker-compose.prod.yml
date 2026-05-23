@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: mobilepos_db_prod
+    environment:
+      POSTGRES_USER: pos_user
+      POSTGRES_PASSWORD: lAbTZaY45dNwB6a26zclmQQ0l9JBkOkf
+      POSTGRES_DB: mobilepos
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pos_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: mobilepos_redis_prod
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mobilepos_api_prod
+    ports:
+      - "3001:3000"
+    environment:
+      DATABASE_URL: postgresql://pos_user:lAbTZaY45dNwB6a26zclmQQ0l9JBkOkf@postgres:5432/mobilepos
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+      JWT_SECRET: g4KojnuSlUHMLKPYLNFGFbFUW5Kz0xpQyR1tqgmyHTM=
+      REFRESH_TOKEN_SECRET: wcSDpvp5u4Iq+V1WqVzWE9U5pQ6qTQxv7Nuqz88Y1Zg=
+      PORT: 3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data_prod:
+
+networks:
+  default:
+    name: mobilepos_network_prod

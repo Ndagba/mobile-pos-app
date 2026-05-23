@@ -1,0 +1,30 @@
+#!/bin/bash
+
+APPNAME=pcnexamdistro
+
+# set node version via scl
+source scl_source enable nodejs20
+NODE=$( which node )
+NPM=$( which npm )
+
+# set your project info here
+PROJECT=myproject
+STARTCMD="$NPM start"
+
+APPDIR=$HOME/apps/$APPNAME
+LOGDIR=$HOME/logs/apps/$APPNAME
+TMPDIR=$APPDIR/tmp
+PROJECTDIR=$APPDIR/$PROJECT
+PIDFILE=$TMPDIR/node.pid
+
+mkdir -p $APPDIR/tmp
+
+if [ -e "$PIDFILE" ] && (pgrep -F $PIDFILE &> /dev/null); then
+  echo "$APPNAME already running."
+  exit 99
+fi
+
+cd $PROJECTDIR
+$PROJECTDIR/node_modules/.bin/next --port 25010 > $LOGDIR/logfile.log 2>&1 & echo $! > $PIDFILE
+
+echo "Started $APPNAME."

@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(eas build *)",
+      "Bash(findstr /C:\"scripts\" /C:\"build\" /C:\"start\")",
+      "Bash(findstr /C:\"notification\" /C:\"expo-\")",
+      "Bash(npx tsc *)",
+      "Bash(cd /mnt/c/Projects/MobilePOS/backend && npx tsc --noEmit 2>&1)",
+      "Skill(anthropic-skills:docx)",
+      "Skill(anthropic-skills:docx:*)",
+      "Read(//c/Users/NDAGBA/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/b35bb0f6-d355-49d8-be42-de661e88a47d/0caf9768-11cc-40ec-8ffd-d9876f0789b9/skills/docx/**)",
+      "Bash(npm install *)",
+      "Bash(npm list *)",
+      "Bash(node create_user_guide.js)",
+      "Bash(npx prisma *)",
+      "Bash(docker-compose up *)",
+      "Bash(docker start *)",
+      "Bash(npx ts-node *)",
+      "Bash(grep -n \"export default function InventoryScreen\" \"/mnt/c/Projects/MobilePOS/mobile/src/screens/InventoryScreen.tsx\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(rm -f C:/Projects/MobilePOS/.git/index.lock)",
+      "Bash(git commit -m 'Phase 4 continued: Add tablet-responsive layouts to mobile screens *)",
+      "Bash(git stash *)"
+    ]
+  }
+}

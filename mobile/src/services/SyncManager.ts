@@ -1,7 +1,6 @@
 import ApiClient from './ApiClient';
 import DatabaseService from './DatabaseService';
 import crypto from 'crypto-js';
-import { v4 as uuidv4 } from 'uuid';
 
 interface PendingTransaction {
   id: string;
@@ -31,50 +30,59 @@ export class SyncManager {
     deviceId: string
   ): Promise<{ synced: number; failed: number; errors: any[] }> {
     try {
-      const unsyncedTransactions = DatabaseService.getUnsyncedTransactions();
-      const transactionsToSync = Array.from(unsyncedTransactions);
+      const unsyncedTransactions = await DatabaseService.getUnsyncedTransactions();
+      const transactionsToSync: any[] = Array.isArray(unsyncedTransactions)
+        ? unsyncedTransactions
+        : Array.from(unsyncedTransactions as Iterable<any>);
 
       if (transactionsToSync.length === 0) {
         return { synced: 0, failed: 0, errors: [] };
       }
 
-      // Prepare batch
+      // Prepare batch (exclude id from payload - it's client-side only)
       const batch = transactionsToSync.map((tx: any) => ({
-        id: tx.id,
         store_id: tx.store_id,
-        user_id: tx.user_id,
-        customer_id: tx.customer_id,
+        branch_id: tx.branch_id,
+        customer_id: tx.customer_id || undefined,
         offline_session_hash: tx.offline_session_hash,
         subtotal: tx.subtotal,
         tax_amount: tx.tax_amount,
         discount_amount: tx.discount_amount,
         total_amount: tx.total_amount,
         payment_method: tx.payment_method,
-        items: Array.from(tx.items)
+        items: Array.isArray(tx.items) ? tx.items : Array.from(tx.items as Iterable<any>)
       }));
 
+      console.log('Syncing batch:', { count: batch.length, batch });
+
       // Send to server
-      const response = await ApiClient.post('/transactions/batch', { transactions: batch });
+      const response = (await ApiClient.post('/transactions/batch', { transactions: batch })) as any;
+      const result = response?.data ?? response;
+
+      console.log('Sync response:', result);
 
       // Update sync status
       let synced = 0;
       let failed = 0;
+      const errors: any[] = [];
 
-      if (response.results) {
-        for (const result of response.results) {
-          await DatabaseService.updateTransactionSyncStatus(result.transaction_id, true);
+      if (result?.results) {
+        for (const item of result.results as any[]) {
+          await DatabaseService.updateTransactionSyncStatusByHash(item.offline_session_hash, true);
           synced++;
         }
       }
 
-      if (response.errors) {
-        failed = response.errors.length;
+      if (result?.errors) {
+        failed = (result.errors as any[]).length;
+        errors.push(...result.errors);
+        console.error('Sync errors:', result.errors);
       }
 
       return {
         synced,
         failed,
-        errors: response.errors || []
+        errors
       };
     } catch (error) {
       console.error('Sync failed:', error);
@@ -88,7 +96,7 @@ export class SyncManager {
 
   static async fetchLatestInventory(deviceId: string) {
     try {
-      const inventory = await ApiClient.get('/inventory');
+      const inventory = (await ApiClient.get('/inventory')) as any[];
       await DatabaseService.saveInventory(inventory);
       return inventory;
     } catch (error) {
@@ -100,7 +108,7 @@ export class SyncManager {
 
   static async fetchLatestProducts(deviceId: string) {
     try {
-      const products = await ApiClient.get('/products?limit=1000');
+      const products = (await ApiClient.get('/products?limit=1000')) as any[];
       await DatabaseService.saveProducts(products);
       return products;
     } catch (error) {

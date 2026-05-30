@@ -1,97 +1,16 @@
-import Realm from 'realm';
-
-// Realm Models
-export const TransactionSchema: Realm.ObjectSchema = {
-  name: 'Transaction',
-  primaryKey: 'id',
-  properties: {
-    id: 'string',
-    store_id: 'string',
-    user_id: 'string',
-    customer_id: 'string?',
-    offline_session_hash: 'string?',
-    is_sync_online: 'bool',
-    subtotal: 'double',
-    tax_amount: 'double',
-    discount_amount: 'double',
-    total_amount: 'double',
-    payment_method: 'string',
-    payment_status: 'string',
-    status: 'string',
-    items: 'TransactionItem[]',
-    created_at: 'date',
-    updated_at: 'date'
-  }
-};
-
-export const TransactionItemSchema: Realm.ObjectSchema = {
-  name: 'TransactionItem',
-  primaryKey: 'id',
-  properties: {
-    id: 'string',
-    product_id: 'string',
-    product_name: 'string',
-    quantity: 'int',
-    unit_price: 'double',
-    tax_amount: 'double',
-    line_total: 'double',
-    created_at: 'date'
-  }
-};
-
-export const ProductSchema: Realm.ObjectSchema = {
-  name: 'Product',
-  primaryKey: 'id',
-  properties: {
-    id: 'string',
-    name: 'string',
-    sku: 'string',
-    marked_price: 'double',
-    effective_price: 'double',
-    tax_rate: 'double',
-    barcode: 'string?',
-    image_url: 'string?',
-    category_id: 'string'
-  }
-};
-
-export const InventorySchema: Realm.ObjectSchema = {
-  name: 'Inventory',
-  primaryKey: 'product_id',
-  properties: {
-    product_id: 'string',
-    quantity_on_hand: 'int',
-    low_stock_threshold: 'int',
-    status: 'string'
-  }
-};
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 class DatabaseService {
-  private realm: Realm | null = null;
-
   async initialize() {
-    if (this.realm) return;
-
-    try {
-      this.realm = await Realm.open({
-        schema: [TransactionSchema, TransactionItemSchema, ProductSchema, InventorySchema],
-        schemaVersion: 1
-      });
-      console.log('Database initialized');
-    } catch (error) {
-      console.error('Failed to open Realm:', error);
-      throw error;
-    }
+    console.log('Database initialized (AsyncStorage)');
   }
 
   // Transaction operations
   async createTransaction(transaction: any) {
-    if (!this.realm) throw new Error('Database not initialized');
-
     try {
-      this.realm.write(() => {
-        this.realm!.create('Transaction', transaction);
-      });
+      const existing = await this.getAllTransactions();
+      existing.push(transaction);
+      await AsyncStorage.setItem('transactions', JSON.stringify(existing));
     } catch (error) {
       console.error('Error creating transaction:', error);
       throw error;
@@ -99,27 +18,40 @@ class DatabaseService {
   }
 
   async getTransaction(id: string) {
-    if (!this.realm) throw new Error('Database not initialized');
+    const transactions = await this.getAllTransactions();
+    return transactions.find((t: any) => t.id === id) || null;
+  }
 
-    return this.realm.objectForPrimaryKey('Transaction', id);
+  async getAllTransactions() {
+    const data = await AsyncStorage.getItem('transactions');
+    return data ? JSON.parse(data) : [];
   }
 
   async getUnsyncedTransactions() {
-    if (!this.realm) throw new Error('Database not initialized');
-
-    return this.realm.objects('Transaction').filtered('is_sync_online == false');
+    const transactions = await this.getAllTransactions();
+    return transactions.filter((t: any) => !t.is_sync_online);
   }
 
   async updateTransactionSyncStatus(id: string, synced: boolean) {
-    if (!this.realm) throw new Error('Database not initialized');
-
     try {
-      this.realm.write(() => {
-        const tx = this.realm!.objectForPrimaryKey('Transaction', id);
-        if (tx) {
-          (tx as any).is_sync_online = synced;
-        }
-      });
+      const transactions = await this.getAllTransactions();
+      const updated = transactions.map((t: any) =>
+        t.id === id ? { ...t, is_sync_online: synced } : t
+      );
+      await AsyncStorage.setItem('transactions', JSON.stringify(updated));
+    } catch (error) {
+      console.error('Error updating transaction sync status:', error);
+      throw error;
+    }
+  }
+
+  async updateTransactionSyncStatusByHash(hash: string, synced: boolean) {
+    try {
+      const transactions = await this.getAllTransactions();
+      const updated = transactions.map((t: any) =>
+        t.offline_session_hash === hash ? { ...t, is_sync_online: synced } : t
+      );
+      await AsyncStorage.setItem('transactions', JSON.stringify(updated));
     } catch (error) {
       console.error('Error updating transaction sync status:', error);
       throw error;
@@ -128,14 +60,11 @@ class DatabaseService {
 
   // Product operations
   async saveProducts(products: any[]) {
-    if (!this.realm) throw new Error('Database not initialized');
-
     try {
-      this.realm.write(() => {
-        products.forEach((product) => {
-          this.realm!.create('Product', product, Realm.UpdateMode.All);
-        });
-      });
+      const existing = await this.getProducts();
+      const map = new Map(existing.map((p: any) => [p.id, p]));
+      products.forEach((p) => map.set(p.id, p));
+      await AsyncStorage.setItem('products', JSON.stringify(Array.from(map.values())));
     } catch (error) {
       console.error('Error saving products:', error);
       throw error;
@@ -143,63 +72,90 @@ class DatabaseService {
   }
 
   async getProducts() {
-    if (!this.realm) throw new Error('Database not initialized');
-
-    return Array.from(this.realm.objects('Product'));
+    const data = await AsyncStorage.getItem('products');
+    return data ? JSON.parse(data) : [];
   }
 
   async searchProducts(query: string) {
-    if (!this.realm) throw new Error('Database not initialized');
-
-    const allProducts = this.realm.objects('Product');
-    return allProducts.filtered(
-      `name CONTAINS[c] "${query}" OR sku CONTAINS[c] "${query}" OR barcode CONTAINS[c] "${query}"`
+    const products = await this.getProducts();
+    const q = query.toLowerCase();
+    return products.filter(
+      (p: any) =>
+        p.name?.toLowerCase().includes(q) ||
+        p.sku?.toLowerCase().includes(q) ||
+        p.barcode?.toLowerCase().includes(q)
     );
   }
 
   // Inventory operations
   async saveInventory(inventory: any[]) {
-    if (!this.realm) throw new Error('Database not initialized');
-
     try {
-      this.realm.write(() => {
-        inventory.forEach((item) => {
-          this.realm!.create('Inventory', item, Realm.UpdateMode.All);
-        });
-      });
+      const existing = await this.getAllInventory();
+      const map = new Map(existing.map((i: any) => [i.product_id, i]));
+      inventory.forEach((i) => map.set(i.product_id, i));
+      await AsyncStorage.setItem('inventory', JSON.stringify(Array.from(map.values())));
     } catch (error) {
       console.error('Error saving inventory:', error);
       throw error;
     }
   }
 
+  async getAllInventory() {
+    const data = await AsyncStorage.getItem('inventory');
+    return data ? JSON.parse(data) : [];
+  }
+
   async getInventoryItem(productId: string) {
-    if (!this.realm) throw new Error('Database not initialized');
-
-    return this.realm.objectForPrimaryKey('Inventory', productId);
+    const inventory = await this.getAllInventory();
+    return inventory.find((i: any) => i.product_id === productId) || null;
   }
 
-  async getLowStockItems() {
-    if (!this.realm) throw new Error('Database not initialized');
-
-    return this.realm.objects('Inventory').filtered('status == "LOW"');
-  }
-
-  // Cleanup
-  async close() {
-    if (this.realm) {
-      this.realm.close();
-      this.realm = null;
+  // Customer operations
+  async saveCustomers(customers: any[]) {
+    try {
+      const existing = await this.getCustomers();
+      const map = new Map(existing.map((c: any) => [c.id, c]));
+      customers.forEach((c) => map.set(c.id, c));
+      await AsyncStorage.setItem('customers', JSON.stringify(Array.from(map.values())));
+    } catch (error) {
+      console.error('Error saving customers:', error);
+      throw error;
     }
   }
 
-  async clearAllData() {
-    if (!this.realm) throw new Error('Database not initialized');
+  async getCustomers() {
+    const data = await AsyncStorage.getItem('customers');
+    return data ? JSON.parse(data) : [];
+  }
 
+  async getLowStockItems() {
+    const inventory = await this.getAllInventory();
+    return inventory.filter((i: any) => i.status === 'LOW');
+  }
+
+  // Generic API response cache — used for stale-while-revalidate page loads.
+  async getApiCache<T = any>(key: string): Promise<T | null> {
     try {
-      this.realm.write(() => {
-        this.realm!.deleteAll();
-      });
+      const data = await AsyncStorage.getItem(`apicache_${key}`);
+      return data ? (JSON.parse(data) as T) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async setApiCache(key: string, data: any) {
+    try {
+      await AsyncStorage.setItem(`apicache_${key}`, JSON.stringify(data));
+    } catch {}
+  }
+
+  async close() {
+    console.log('Database closed');
+  }
+
+  async clearAllData() {
+    try {
+      await AsyncStorage.multiRemove(['transactions', 'products', 'inventory']);
     } catch (error) {
       console.error('Error clearing data:', error);
       throw error;

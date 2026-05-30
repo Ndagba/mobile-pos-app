@@ -21,6 +21,7 @@ import {
   verifyPaymentStart,
   verifyPaymentSuccess,
   verifyPaymentError,
+  setSubscriptionAccess,
 } from '../redux/slices/subscriptionSlice';
 import { ApiClient } from '../services/ApiClient';
 import { getSubscriptionService } from '../services/SubscriptionService';
@@ -111,17 +112,16 @@ const OnboardingPaymentScreen = ({ navigation }: any) => {
       );
 
       dispatch(verifyPaymentSuccess(subscription));
+      // Unlock the whole app — AppNavigator watches accessActive and swaps the
+      // locked root back to the authenticated root, so no manual navigation is
+      // needed (the 'Dashboard' route isn't even mounted in the locked stack).
+      dispatch(setSubscriptionAccess({ active: true }));
       setVerifying(false);
 
       Alert.alert(
         'Success',
         'Your subscription is now active! You have 2 months of service.',
-        [
-          {
-            text: 'Continue',
-            onPress: () => navigation.navigate('Dashboard'),
-          },
-        ]
+        [{ text: 'Continue' }]
       );
     } catch (error: any) {
       dispatch(verifyPaymentError(error.message));

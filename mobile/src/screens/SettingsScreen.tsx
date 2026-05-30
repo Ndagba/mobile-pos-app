@@ -1052,10 +1052,10 @@ export default function SettingsScreen() {
           </>
         )}
 
-        {/* ══════════ PLATFORM — SUBSCRIPTIONS (super-admin only) ══════════ */}
+        {/* ══════════ ADMIN (super-admin only) ══════════ */}
         {isSuperAdmin && (
           <>
-            <SectionHeader label="Platform — Subscriptions" />
+            <SectionHeader label="Admin" />
 
             <TouchableOpacity
               style={[styles.card, styles.navRow, { marginBottom: 14 }]}
@@ -1064,15 +1064,15 @@ export default function SettingsScreen() {
             >
               <View style={[styles.navIcon, { backgroundColor: C.accent + '1A' }]}>
                 <MaterialCommunityIcons
-                  name="card-account-details-outline"
+                  name="receipt"
                   size={20}
                   color={C.accent}
                 />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.navTitle}>Manage Subscriptions</Text>
+                <Text style={styles.navTitle}>Manage subscriptions</Text>
                 <Text style={styles.navSubtitle}>
-                  Create, extend, activate or deactivate store subscriptions
+                  Plans, billing & expirations across all stores
                 </Text>
               </View>
               <MaterialCommunityIcons

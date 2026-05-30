@@ -1,12 +1,13 @@
 import ApiClient from './ApiClient';
 import DatabaseService from './DatabaseService';
 import { SyncManager } from './SyncManager';
-import { v4 as uuidv4 } from 'uuid';
+import { generateId } from '../utils/generateId';
 
 export interface TransactionInput {
   store_id: string;
   user_id: string;
   customer_id?: string;
+  branch_id?: string | null;
   items: Array<{
     product_id: string;
     product_name: string;
@@ -28,7 +29,7 @@ export class TransactionService {
     deviceId: string,
     isOnline: boolean
   ) {
-    const transactionId = uuidv4();
+    const transactionId = generateId();
 
     const transaction = {
       id: transactionId,
@@ -41,17 +42,31 @@ export class TransactionService {
     if (isOnline) {
       try {
         // Submit to server
-        const response = await ApiClient.post('/transactions', {
+        const response = (await ApiClient.post('/transactions', {
           ...transaction,
+          items: input.items
+        })) as any;
+
+        // ApiClient returns an optimistic echo of the request body when it can't
+        // reach the server (network error). A genuine server response carries a
+        // server-generated receipt_number — its absence means we're actually
+        // offline and the sale has NOT been persisted on the backend yet.
+        const confirmedByServer = !!response?.receipt_number;
+
+        await DatabaseService.createTransaction({
+          ...transaction,
+          is_sync_online: confirmedByServer,
           items: input.items
         });
 
-        // Also save locally
-        await DatabaseService.createTransaction({
-          ...transaction,
-          is_sync_online: true,
-          items: input.items
-        });
+        if (!confirmedByServer) {
+          return {
+            success: true,
+            transaction_id: transactionId,
+            status: 'queued_for_sync',
+            message: 'Saved offline. Will sync when online.'
+          };
+        }
 
         return {
           success: true,
@@ -59,9 +74,17 @@ export class TransactionService {
           receipt_number: response.receipt_number,
           status: 'completed'
         };
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error creating online transaction:', error);
-        // Fallback to offline
+
+        // The server responded with an error (e.g. subscription inactive,
+        // validation failure). This is a real rejection, NOT an offline
+        // condition — surface it to the cashier instead of faking a sale.
+        if (error?.response) {
+          throw error;
+        }
+
+        // Genuine network error (no response): queue locally for later sync.
         await DatabaseService.createTransaction({
           ...transaction,
           is_sync_online: false,
@@ -72,7 +95,7 @@ export class TransactionService {
           success: true,
           transaction_id: transactionId,
           status: 'queued_for_sync',
-          error: 'Offline: Transaction queued for sync'
+          message: 'Saved offline. Will sync when online.'
         };
       }
     } else {
@@ -112,7 +135,7 @@ export class TransactionService {
     }
   }
 
-  static async calculateTax(subtotal: number, taxRate: number): number {
+  static async calculateTax(subtotal: number, taxRate: number): Promise<number> {
     return (subtotal * taxRate) / 100;
   }
 

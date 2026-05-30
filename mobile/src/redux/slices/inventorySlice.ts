@@ -20,7 +20,7 @@ export interface InventoryItem {
 
 export interface InventoryState {
   products: Product[];
-  inventory: Map<string, InventoryItem>;
+  inventory: Record<string, InventoryItem>;
   categories: any[];
   searchQuery: string;
   filteredProducts: Product[];
@@ -33,7 +33,7 @@ export interface InventoryState {
 
 const initialState: InventoryState = {
   products: [],
-  inventory: new Map(),
+  inventory: {},
   categories: [],
   searchQuery: '',
   filteredProducts: [],
@@ -59,7 +59,9 @@ const inventorySlice = createSlice({
       state.filteredProducts = action.payload;
     },
     setInventory: (state, action: PayloadAction<InventoryItem[]>) => {
-      state.inventory = new Map(action.payload.map((item) => [item.product_id, item]));
+      const map: Record<string, InventoryItem> = {};
+      action.payload.forEach(item => { map[item.product_id] = item; });
+      state.inventory = map;
     },
     setCategories: (state, action: PayloadAction<any[]>) => {
       state.categories = action.payload;
@@ -83,15 +85,15 @@ const inventorySlice = createSlice({
       state.lastSync = action.payload;
     },
     updateProductStock: (state, action: PayloadAction<{ product_id: string; quantity: number }>) => {
-      const item = state.inventory.get(action.payload.product_id);
+      const item = state.inventory[action.payload.product_id];
       if (item) {
         item.quantity_on_hand = action.payload.quantity;
         item.status =
           action.payload.quantity === 0
             ? 'OUT_OF_STOCK'
             : action.payload.quantity <= item.low_stock_threshold
-            ? 'LOW'
-            : 'IN_STOCK';
+              ? 'LOW'
+              : 'IN_STOCK';
       }
     }
   }

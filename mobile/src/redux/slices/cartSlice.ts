@@ -5,8 +5,7 @@ export interface CartItem {
   product_name: string;
   quantity: number;
   unit_price: number;
-  tax_amount: number;
-  line_total: number;
+  tax_rate: number;
   discount_amount?: number;
 }
 
@@ -43,7 +42,6 @@ const cartSlice = createSlice({
 
       if (existingItem) {
         existingItem.quantity += action.payload.quantity;
-        existingItem.line_total = existingItem.unit_price * existingItem.quantity - (existingItem.discount_amount || 0);
       } else {
         state.items.push(action.payload);
       }
@@ -58,7 +56,6 @@ const cartSlice = createSlice({
       const item = state.items.find((i) => i.product_id === action.payload.product_id);
       if (item) {
         item.quantity = action.payload.quantity;
-        item.line_total = item.unit_price * item.quantity - (item.discount_amount || 0);
       }
       cartSlice.caseReducers.recalculateTotals(state);
     },
@@ -91,7 +88,10 @@ const cartSlice = createSlice({
     },
     recalculateTotals: (state) => {
       state.subtotal = state.items.reduce((sum, item) => sum + item.unit_price * item.quantity, 0);
-      state.tax_amount = state.items.reduce((sum, item) => sum + item.tax_amount, 0);
+      state.tax_amount = state.items.reduce((sum, item) => {
+        const taxRate = item.tax_rate ?? 0;
+        return sum + (item.unit_price * item.quantity * taxRate) / 100;
+      }, 0);
       state.total = state.subtotal + state.tax_amount - state.discount_amount;
     }
   }

@@ -29,6 +29,7 @@ class ApiClient {
     // Request interceptor for auth
     this.axiosInstance.interceptors.request.use(async (config) => {
       const token = await this.getAccessToken();
+      console.log('API Request:', config.url, 'Token:', token ? token.substring(0, 20) + '...' : 'NONE');
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
@@ -37,9 +38,20 @@ class ApiClient {
 
     // Response interceptor for token refresh
     this.axiosInstance.interceptors.response.use(
-      (response) => response,
+      (response) => {
+        // Any successful HTTP response means the network is up — clear the
+        // offline flag so subsequent requests go through normally.
+        this.isOnline = true;
+        return response;
+      },
       async (error: AxiosError) => {
-        if (error.response?.status === 401) {
+        const requestUrl = error.config?.url ?? '';
+
+        // Never attempt a silent token refresh for auth endpoints — it would
+        // mask the real error (e.g. "wrong credentials") with a refresh failure.
+        const isAuthEndpoint = requestUrl.includes('/auth/');
+
+        if (error.response?.status === 401 && !isAuthEndpoint) {
           const refreshToken = await this.getRefreshToken();
           if (refreshToken) {
             try {
@@ -52,21 +64,21 @@ class ApiClient {
                 response.data.data.refresh_token
               );
 
-              // Retry original request
+              // Retry original request with the new token
               const originalRequest = error.config;
               if (originalRequest) {
                 originalRequest.headers.Authorization = `Bearer ${response.data.data.access_token}`;
                 return this.axiosInstance(originalRequest);
               }
             } catch (refreshError) {
-              // Logout user
+              // Refresh also failed — clear tokens so the user is sent back to login
               await this.clearTokens();
               throw refreshError;
             }
           }
         }
 
-        // Handle offline
+        // Mark as offline on network-level errors (no HTTP response received)
         if (!error.response && error.message === 'Network Error') {
           this.isOnline = false;
         }
@@ -95,7 +107,11 @@ class ApiClient {
       const response = await this.axiosInstance.post(url, data, config);
       return response.data.data;
     } catch (error) {
-      if (!this.isOnline && error instanceof AxiosError && !error.response) {
+      // Auth endpoints must NEVER use the offline fallback — returning the
+      // request body instead of real tokens would silently pass undefined
+      // strings to SecureStore and crash the app.
+      const isAuthRoute = url.includes('/auth/');
+      if (!isAuthRoute && !this.isOnline && error instanceof AxiosError && !error.response) {
         // Queue for later sync
         this.offlineQueue.push({
           method: 'POST',
@@ -163,6 +179,12 @@ class ApiClient {
 
   private async getAccessToken(): Promise<string | null> {
     try {
+      // Check Redux store first (available immediately after login)
+      const { store } = require('../redux/store');
+      const token = store.getState().auth.access_token;
+      if (token) return token;
+
+      // Fallback to SecureStore
       if (Platform.OS === 'web') {
         return AsyncStorage.getItem('access_token');
       } else {
@@ -237,5 +259,10 @@ class ApiClient {
     }
   }
 }
+
+// Named export of the class for screens/services that need their own
+// instance (admin tools, onboarding flows) without sharing the singleton's
+// offline queue.
+export { ApiClient };
 
 export default new ApiClient();

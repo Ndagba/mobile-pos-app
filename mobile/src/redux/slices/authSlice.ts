@@ -4,8 +4,12 @@ interface User {
   id: string;
   email: string;
   first_name: string;
+  last_name?: string;
   role: 'admin' | 'manager' | 'cashier';
   store_id: string;
+  branch_id: string | null;
+  branch_name: string | null;
+  is_super_admin?: boolean;
 }
 
 interface AuthState {
@@ -64,6 +68,9 @@ const authSlice = createSlice({
       state.biometric_enabled = true;
       state.device_id = action.payload.device_id;
     },
+    disableBiometric: (state) => {
+      state.biometric_enabled = false;
+    },
     logout: (state) => {
       state.isAuthenticated = false;
       state.user = null;
@@ -81,6 +88,6 @@ const authSlice = createSlice({
   }
 });
 
-export const { setLoading, setError, loginSuccess, enableBiometric, logout, refreshToken } =
+export const { setLoading, setError, loginSuccess, enableBiometric, disableBiometric, logout, refreshToken } =
   authSlice.actions;
 export default authSlice.reducer;

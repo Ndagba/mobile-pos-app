@@ -8,7 +8,9 @@ export const BREAKPOINTS = {
   phone: 0,
   tablet: 600, // 600dp+ is typically tablet
   large_tablet: 900, // 900dp+ is large tablet
-};
+} as const;
+
+export type DeviceType = 'phone' | 'tablet' | 'large_tablet';
 
 export interface ResponsiveValues<T> {
   phone: T;
@@ -28,10 +30,18 @@ export const useResponsive = () => {
   const isLandscape = width > height;
 
   const getValue = <T,>(values: ResponsiveValues<T>): T => {
-    if (isLargeTablet && values.large_tablet) return values.large_tablet;
-    if (isTablet && values.tablet) return values.tablet;
+    if (isLargeTablet && values.large_tablet !== undefined) return values.large_tablet;
+    if (isTablet && values.tablet !== undefined) return values.tablet;
     return values.phone;
   };
+
+  // Narrow the return type to the union so downstream consumers
+  // (responsiveSpacing, responsiveFontSize, etc.) accept it without casts.
+  const deviceType: DeviceType = isLargeTablet
+    ? 'large_tablet'
+    : isTablet
+      ? 'tablet'
+      : 'phone';
 
   return {
     width,
@@ -41,14 +51,14 @@ export const useResponsive = () => {
     isPortrait,
     isLandscape,
     getValue,
-    deviceType: isLargeTablet ? 'large_tablet' : isTablet ? 'tablet' : 'phone',
+    deviceType,
   };
 };
 
 /**
  * Responsive spacing values
  */
-export const responsiveSpacing = (deviceType: 'phone' | 'tablet' | 'large_tablet') => {
+export const responsiveSpacing = (deviceType: DeviceType) => {
   const spacing = {
     xs: 4,
     sm: 8,
@@ -86,7 +96,7 @@ export const responsiveSpacing = (deviceType: 'phone' | 'tablet' | 'large_tablet
 /**
  * Responsive font sizes
  */
-export const responsiveFontSize = (deviceType: 'phone' | 'tablet' | 'large_tablet') => {
+export const responsiveFontSize = (deviceType: DeviceType) => {
   const sizes = {
     xs: 10,
     sm: 12,
@@ -127,7 +137,7 @@ export const responsiveFontSize = (deviceType: 'phone' | 'tablet' | 'large_table
 /**
  * Responsive button sizing
  */
-export const responsiveButtonSize = (deviceType: 'phone' | 'tablet' | 'large_tablet') => {
+export const responsiveButtonSize = (deviceType: DeviceType) => {
   const sizes = {
     small: { paddingVertical: 8, paddingHorizontal: 12 },
     medium: { paddingVertical: 12, paddingHorizontal: 16 },
@@ -156,7 +166,7 @@ export const responsiveButtonSize = (deviceType: 'phone' | 'tablet' | 'large_tab
 /**
  * Responsive touch target size (minimum 48dp for accessibility)
  */
-export const responsiveMinTouchTarget = (deviceType: 'phone' | 'tablet' | 'large_tablet') => {
+export const responsiveMinTouchTarget = (deviceType: DeviceType) => {
   if (deviceType === 'large_tablet') return 64;
   if (deviceType === 'tablet') return 56;
   return 48;
@@ -165,7 +175,7 @@ export const responsiveMinTouchTarget = (deviceType: 'phone' | 'tablet' | 'large
 /**
  * Grid column count based on device
  */
-export const responsiveGridColumns = (deviceType: 'phone' | 'tablet' | 'large_tablet') => {
+export const responsiveGridColumns = (deviceType: DeviceType) => {
   if (deviceType === 'large_tablet') return 4;
   if (deviceType === 'tablet') return 3;
   return 2;
@@ -174,6 +184,6 @@ export const responsiveGridColumns = (deviceType: 'phone' | 'tablet' | 'large_ta
 /**
  * Master-detail layout: should show split view?
  */
-export const shouldShowMasterDetail = (deviceType: 'phone' | 'tablet' | 'large_tablet') => {
+export const shouldShowMasterDetail = (deviceType: DeviceType) => {
   return deviceType !== 'phone';
 };

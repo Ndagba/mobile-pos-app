@@ -51,6 +51,14 @@ interface SubscriptionState {
   plans: SubscriptionPlan[];
   invoices: Invoice[];
 
+  // Whole-store access gate. `accessChecked` is false until we've heard back
+  // from the server at least once; until then we fail OPEN (accessActive: true)
+  // so a network blip never locks a paying store out of the app. Once the
+  // server confirms the subscription is inactive, accessActive flips to false
+  // and the entire app is gated behind the renewal screen.
+  accessChecked: boolean;
+  accessActive: boolean;
+
   // Trial info
   trialDaysLeft: number | null;
   trialEndsAt: string | null;
@@ -74,6 +82,8 @@ const initialState: SubscriptionState = {
   subscription: null,
   plans: [],
   invoices: [],
+  accessChecked: false,
+  accessActive: true,
   trialDaysLeft: null,
   trialEndsAt: null,
   loading: false,
@@ -113,6 +123,13 @@ const subscriptionSlice = createSlice({
       state.error = action.payload;
     },
 
+    // Whole-store access gate. Dispatched after the app checks the store's
+    // subscription status against the server.
+    setSubscriptionAccess: (state, action: PayloadAction<{ active: boolean }>) => {
+      state.accessChecked = true;
+      state.accessActive = action.payload.active;
+    },
+
     // Fetch plans
     fetchPlansStart: (state) => {
       state.plansLoading = true;
@@ -149,6 +166,8 @@ const subscriptionSlice = createSlice({
     startTrialSuccess: (state, action: PayloadAction<Subscription>) => {
       state.loading = false;
       state.subscription = action.payload;
+      state.accessChecked = true;
+      state.accessActive = true;
 
       if (action.payload.trial_ends_at) {
         const now = new Date();
@@ -190,6 +209,8 @@ const subscriptionSlice = createSlice({
     verifyPaymentSuccess: (state, action: PayloadAction<Subscription>) => {
       state.loading = false;
       state.subscription = action.payload;
+      state.accessChecked = true;
+      state.accessActive = true;
       state.paymentAuthorizationUrl = null;
       state.paymentReference = null;
     },
@@ -220,6 +241,8 @@ const subscriptionSlice = createSlice({
     cancelSubscriptionSuccess: (state) => {
       state.loading = false;
       state.subscription = null;
+      state.accessChecked = true;
+      state.accessActive = false;
       state.trialDaysLeft = null;
       state.trialEndsAt = null;
     },
@@ -246,6 +269,7 @@ export const {
   fetchSubscriptionStart,
   fetchSubscriptionSuccess,
   fetchSubscriptionError,
+  setSubscriptionAccess,
   fetchPlansStart,
   fetchPlansSuccess,
   fetchPlansError,

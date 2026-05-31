@@ -195,7 +195,7 @@ export default function InventoryScreen() {
       await Promise.all([
         loadProducts(selectedBranchRef.current),
         loadCategories(selectedBranchRef.current),
-        loadLowStock(),
+        loadLowStock(selectedBranchRef.current),
       ]);
       setLoading(false);
     };
@@ -229,16 +229,18 @@ export default function InventoryScreen() {
     } catch {}
   };
 
-  const loadLowStock = async () => {
+  const loadLowStock = async (branchId?: string | null) => {
     try {
-      const res: any = await ApiClient.get('/inventory/low-stock');
+      const branchParam = isAdmin && branchId
+        ? `?branch_id=${encodeURIComponent(branchId)}` : '';
+      const res: any = await ApiClient.get(`/inventory/low-stock${branchParam}`);
       dispatch(setLowStockAlerts(Array.isArray(res) ? res : res?.data ?? []));
     } catch {}
   };
 
   const loadAll = async (branchId: string | null = selectedBranchRef.current) => {
     setLoading(true);
-    await Promise.all([loadProducts(branchId), loadCategories(branchId), loadLowStock()]);
+    await Promise.all([loadProducts(branchId), loadCategories(branchId), loadLowStock(branchId)]);
     setLoading(false);
   };
 

@@ -1,11 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../../lib/prisma';
 import { v4 as uuidv4 } from 'uuid';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { catchAsync, AppError } from '../../utils/errorHandler';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 // GET /v1/categories — list active categories for the user's branch (authenticated)
 router.get(
@@ -20,11 +19,15 @@ router.get(
     const where: any = { is_active: true };
 
     // Branch filtering — same hierarchy as products:
-    //   1. Admin passes explicit ?branch_id → use it
-    //   2. JWT has a branchId (manager / cashier) → use it
-    //   3. Admin with no branch → scope to whole store via branch relation
-    if (role === 'admin' && req.query.branch_id) {
-      where.branch_id = req.query.branch_id as string;
+    //   • Admin: explicit ?branch_id filters to that branch; without it the admin
+    //     sees the whole store. The admin's own JWT branch must NOT scope the list.
+    //   • Manager / cashier: always scoped to their JWT branch.
+    if (role === 'admin') {
+      if (req.query.branch_id) {
+        where.branch_id = req.query.branch_id as string;
+      } else if (storeId) {
+        where.branch = { store_id: storeId };
+      }
     } else if (branchId) {
       where.branch_id = branchId;
     } else if (storeId) {
@@ -74,8 +77,15 @@ router.post(
       throw new AppError(403, 'Only admins or managers can create categories');
     }
 
-    // Determine branchId: from JWT first, then from body as fallback
-    const branchId: string | null = user?.branchId ?? req.body.branch_id ?? null;
+    // Determine branchId. An admin is a store-level role and explicitly chooses
+    // the target branch in the UI, so an admin's body.branch_id MUST win over
+    // their own JWT branch — otherwise every category lands on the admin's home
+    // branch regardless of what they selected. Managers/cashiers are pinned to
+    // their JWT branch.
+    const branchId: string | null =
+      role === 'admin'
+        ? (req.body.branch_id ?? user?.branchId ?? null)
+        : (user?.branchId ?? req.body.branch_id ?? null);
 
     if (!branchId) {
       throw new AppError(400, 'branch_id is required (assign the user to a branch or pass branch_id in request body)');

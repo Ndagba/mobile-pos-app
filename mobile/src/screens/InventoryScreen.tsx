@@ -80,6 +80,9 @@ const EMPTY_PRODUCT = {
 };
 const EMPTY_CATEGORY = { name: '', description: '', branch_id: '' };
 
+// AsyncStorage key for an in-progress "New Product" draft.
+const PRODUCT_DRAFT_KEY = '@pos_product_draft';
+
 // ─── Category Dropdown ────────────────────────────────────────
 function CategoryDropdown({
   categories, value, onChange, onAddNew,
@@ -338,12 +341,50 @@ export default function InventoryScreen() {
   const openNewProduct = async () => {
     setEditingProduct(null);
     const storedThreshold = await AsyncStorage.getItem('@pos_low_stock_threshold');
+
+    // Restore a previously saved draft if one exists, so "Save draft" actually
+    // brings the work back. The branch always follows the current selection.
+    let draft: Partial<typeof EMPTY_PRODUCT> | null = null;
+    try {
+      const raw = await AsyncStorage.getItem(PRODUCT_DRAFT_KEY);
+      if (raw) draft = JSON.parse(raw);
+    } catch {}
+
     setProductForm({
       ...EMPTY_PRODUCT,
       low_stock_threshold: storedThreshold ?? '10',
-      branch_id: selectedBranchRef.current ?? '',
+      ...(draft ?? {}),
+      branch_id: selectedBranchRef.current ?? draft?.branch_id ?? '',
     });
     setShowProductForm(true);
+  };
+
+  // Persist the in-progress product form so the user can resume later. Empty
+  // forms are treated as "nothing to save" and just close the modal.
+  const persistDraft = async (): Promise<boolean> => {
+    const hasContent =
+      productForm.name.trim() ||
+      productForm.sku.trim() ||
+      productForm.marked_price.trim() ||
+      productForm.barcode.trim();
+    if (!hasContent) return false;
+    try {
+      await AsyncStorage.setItem(PRODUCT_DRAFT_KEY, JSON.stringify(productForm));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    const saved = await persistDraft();
+    setShowProductForm(false);
+    if (saved) {
+      Alert.alert(
+        'Draft Saved',
+        'Your product draft was saved. Reopen "New Product" to continue where you left off.'
+      );
+    }
   };
 
   const openEditProduct = (p: Product) => {
@@ -410,6 +451,8 @@ export default function InventoryScreen() {
         payload.low_stock_threshold = Math.max(1, parseInt(productForm.low_stock_threshold || '10', 10));
         if (productForm.branch_id) payload.branch_id = productForm.branch_id;
         await ApiClient.post('/products', payload);
+        // Product saved for real — discard any lingering draft.
+        try { await AsyncStorage.removeItem(PRODUCT_DRAFT_KEY); } catch {}
         Alert.alert('Created', `"${productForm.name}" created`);
       }
       setShowProductForm(false);
@@ -1296,7 +1339,7 @@ export default function InventoryScreen() {
               <Text style={styles.modalSubtitle}>Add to catalog</Text>
             </View>
             {!editingProduct && (
-              <TouchableOpacity style={styles.saveDraftBtn} onPress={() => setShowProductForm(false)}>
+              <TouchableOpacity style={styles.saveDraftBtn} onPress={handleSaveDraft}>
                 <Text style={styles.saveDraftText}>Save draft</Text>
               </TouchableOpacity>
             )}
@@ -1447,7 +1490,10 @@ export default function InventoryScreen() {
               categories={categories}
               value={productForm.category_id}
               onChange={id => setProductForm(f => ({ ...f, category_id: id }))}
-              onAddNew={() => {
+              onAddNew={async () => {
+                // Preserve the in-progress product as a draft so the detour to
+                // create a category doesn't throw away what they've typed.
+                await persistDraft();
                 setShowProductForm(false);
                 setTimeout(() => openNewCategory(), 300);
               }}

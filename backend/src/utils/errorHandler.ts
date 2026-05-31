@@ -36,6 +36,23 @@ export const errorHandler = (
     });
   }
 
+  // Prisma unique-constraint violation (P2002) — translate to a clear 409 so
+  // duplicate records never surface as a generic "Internal server error".
+  if ((err as any)?.code === 'P2002') {
+    const target = (err as any)?.meta?.target;
+    const fields = Array.isArray(target) ? target.join(', ') : String(target ?? 'value');
+    logger.error({
+      event: 'unique_constraint_violation',
+      target,
+      path: req.path,
+      method: req.method
+    });
+    return res.status(409).json({
+      status: 'error',
+      message: `A record with the same ${fields} already exists.`
+    });
+  }
+
   // Unknown error
   logger.error({
     event: 'unexpected_error',

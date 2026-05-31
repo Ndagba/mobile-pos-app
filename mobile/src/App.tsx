@@ -17,7 +17,6 @@ import ApiClient from './services/ApiClient';
 import { SyncManager } from './services/SyncManager';
 import NotificationService from './services/NotificationService';
 import { setConnected, setLastSyncAt, setSyncMode, clearSyncQueue } from './redux/slices/syncSlice';
-import { setSubscriptionAccess } from './redux/slices/subscriptionSlice';
 import FloatingTabBar from './components/ui/FloatingTabBar';
 import { useResponsive, responsiveSpacing, responsiveFontSize } from './utils/responsiveDesign';
 import { C } from './theme';
@@ -67,22 +66,6 @@ async function prefetchCustomers() {
   }
 }
 
-// Ask the server whether this store's subscription is active and record the
-// answer. We FAIL OPEN on a network error (leave accessActive untouched) so a
-// connectivity blip never locks a paying store out — only a confirmed-inactive
-// answer (or a 404 = no subscription) gates the app.
-async function checkSubscriptionAccess() {
-  try {
-    const sub: any = await ApiClient.get('/subscriptions');
-    store.dispatch(setSubscriptionAccess({ active: !!sub?.is_active }));
-  } catch (error: any) {
-    if (error?.response?.status === 404) {
-      store.dispatch(setSubscriptionAccess({ active: false }));
-    }
-    // any other error (network/5xx) → leave current access state as-is
-  }
-}
-
 // Screens
 import AuthScreen          from './screens/AuthScreen';
 import DashboardScreen     from './screens/DashboardScreen';
@@ -94,8 +77,6 @@ import TransactionsScreen  from './screens/TransactionsScreen';
 import CustomersScreen     from './screens/CustomersScreen';
 import CustomerLedgerScreen from './screens/CustomerLedgerScreen';
 import AdminSubscriptionsScreen from './screens/AdminSubscriptionsScreen';
-import SubscriptionLockedScreen from './screens/SubscriptionLockedScreen';
-import OnboardingPaymentScreen from './screens/OnboardingPaymentScreen';
 
 const Tab   = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -370,36 +351,19 @@ function AuthenticatedRoot() {
   );
 }
 
-// ─── Subscription-locked root ─────────────────────────────────
-// Replaces the whole authenticated app when the store's subscription is
-// confirmed inactive. Only the lockout screen and the renewal flow are
-// reachable — no Dashboard, no sales, nothing.
-function SubscriptionLockedRoot() {
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="SubscriptionLocked" component={SubscriptionLockedScreen} />
-      <Stack.Screen name="OnboardingPayment" component={OnboardingPaymentScreen} />
-    </Stack.Navigator>
-  );
-}
-
 // ─── App navigator (auth gate) ────────────────────────────────
 function AppNavigator() {
   const [isLoading, setIsLoading] = useState(true);
   const auth = useSelector((state: RootState) => state.auth);
-  const subscription = useSelector((state: RootState) => state.subscription);
 
   useEffect(() => {
     bootstrapAsync();
   }, []);
 
-  // After login — cache customers and check subscription access. NetInfo only
-  // fires on connectivity changes, so a fresh login while already online would
-  // otherwise miss both.
+  // After login — cache customers so the Customers screen works offline.
   useEffect(() => {
     if (auth.isAuthenticated) {
       prefetchCustomers();
-      checkSubscriptionAccess();
     }
   }, [auth.isAuthenticated]);
 
@@ -416,9 +380,6 @@ function AppNavigator() {
         if (online) {
           runPendingSync();
           prefetchCustomers();
-          // Re-verify access on reconnect so an expiry that happened while
-          // offline gates the app as soon as connectivity returns.
-          if (store.getState().auth.isAuthenticated) checkSubscriptionAccess();
         }
       });
     } catch (error) {
@@ -436,22 +397,13 @@ function AppNavigator() {
     );
   }
 
-  // Whole-store lockout: once the server confirms the subscription is inactive
-  // (accessChecked && !accessActive), every role is gated behind the renewal
-  // screen. Super admins are exempt so they can always manage the platform.
-  const locked =
-    subscription.accessChecked &&
-    !subscription.accessActive &&
-    !auth.user?.is_super_admin;
-
+  // Subscription is managed manually by the super admin for now. The app no
+  // longer auto-locks the whole store based on subscription status — renewal
+  // and status changes are handled from the admin tooling, not by gating login.
   return (
     <NavigationContainer>
       {auth.isAuthenticated ? (
-        locked ? (
-          <SubscriptionLockedRoot />
-        ) : (
-          <AuthenticatedRoot />
-        )
+        <AuthenticatedRoot />
       ) : (
         <Stack.Navigator id="auth" screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Auth" component={AuthScreen} />

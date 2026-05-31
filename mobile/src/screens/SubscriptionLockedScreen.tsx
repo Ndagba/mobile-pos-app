@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useDispatch, useSelector } from 'react-redux';
+import * as SecureStore from 'expo-secure-store';
 import { RootState } from '../redux/store';
 import { logout } from '../redux/slices/authSlice';
 import { setSubscriptionAccess } from '../redux/slices/subscriptionSlice';
@@ -23,6 +24,22 @@ const SubscriptionLockedScreen = ({ navigation }: any) => {
 
   const [rechecking, setRechecking] = useState(false);
   const [recheckError, setRecheckError] = useState<string | null>(null);
+
+  // Clear the stored session BEFORE dispatching logout. Otherwise AuthScreen's
+  // tryRestoreSession() reads the still-present token on mount and immediately
+  // logs the user back in — making the Log Out button appear to do nothing.
+  const handleLogout = async () => {
+    try {
+      await Promise.all([
+        SecureStore.deleteItemAsync('access_token'),
+        SecureStore.deleteItemAsync('refresh_token'),
+        SecureStore.deleteItemAsync('auth_user'),
+      ]);
+    } catch {
+      // ignore — dispatching logout still clears in-memory auth state
+    }
+    dispatch(logout());
+  };
 
   // Ask the server whether the subscription has come back to life. If it has,
   // flipping accessActive lets App.tsx swap back to the authenticated root.
@@ -97,7 +114,7 @@ const SubscriptionLockedScreen = ({ navigation }: any) => {
 
         <TouchableOpacity
           style={styles.logoutButton}
-          onPress={() => dispatch(logout())}
+          onPress={handleLogout}
           disabled={rechecking}
         >
           <Text style={styles.logoutButtonText}>Log Out</Text>

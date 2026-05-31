@@ -1,13 +1,26 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { addDays, addMonths } from 'date-fns';
 
-const prisma = new PrismaClient();
+// Demo / management stores that are exempt from subscription billing — e.g. the
+// super admin's own store_001, which is used to run demos and manage other
+// stores and intentionally has no managed subscription. These are always
+// treated as active so they're never gated. Override via the
+// SUBSCRIPTION_EXEMPT_STORE_IDS env var (comma-separated store IDs).
+const EXEMPT_STORE_IDS = new Set(
+  (process.env.SUBSCRIPTION_EXEMPT_STORE_IDS ?? 'store_001')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
 
 export class SubscriptionService {
   /**
    * Check if a store has an active subscription
    */
   async isStoreActive(storeId: string): Promise<boolean> {
+    // Exempt demo / management stores from subscription gating entirely.
+    if (EXEMPT_STORE_IDS.has(storeId)) return true;
+
     const subscription = await prisma.subscription.findUnique({
       where: { store_id: storeId },
     });

@@ -588,6 +588,9 @@ export default function InventoryScreen() {
       : `${branches.find(b => b.id === selectedBranchId)?.name?.toUpperCase() ?? 'BRANCH'} · STOCK VALUE`
     : 'STOCK VALUE';
 
+  // Category grid columns: 2 on phone, 3 on tablet, 4 on large tablet.
+  const categoryColumns = gridColumns;
+
   const tabData = activeTab === 'products' ? displayedProducts
     : activeTab === 'categories' ? filteredCategories
     : filteredLowStock;
@@ -1212,13 +1215,19 @@ export default function InventoryScreen() {
         ? <View style={styles.loadingCenter}>
             <ActivityIndicator size={32} color={C.accent} />
           </View>
-        : <View style={activeTab === 'categories' ? { flex: 1 } : styles.listWrapper}>
+        : <View style={
+            activeTab === 'categories'
+              ? { flex: 1 }
+              : [styles.listWrapper, isTablet && styles.listWrapperTablet]
+          }>
             <FlatList
-              key={activeTab}
+              // numColumns must be baked into the key — FlatList can't change it
+              // on the fly. Categories use a wider multi-column grid on tablets.
+              key={`${activeTab}-${categoryColumns}`}
               data={tabData as any[]}
               renderItem={tabRender as any}
               keyExtractor={tabKey}
-              numColumns={activeTab === 'categories' ? 2 : 1}
+              numColumns={activeTab === 'categories' ? categoryColumns : 1}
               contentContainerStyle={
                 activeTab === 'categories'
                   ? { paddingHorizontal: S.lg, paddingTop: 4, paddingBottom: 120 }
@@ -1757,6 +1766,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
     overflow: 'hidden',
+  },
+  // On tablets, cap the single-column list (e.g. Low Stock) to a comfortable
+  // centred width instead of stretching rows edge-to-edge across the screen.
+  listWrapperTablet: {
+    width: '100%',
+    maxWidth: 760,
+    alignSelf: 'center',
+    marginHorizontal: 0,
   },
   loadingCenter: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   separator: { height: 1, backgroundColor: C.border, marginLeft: 68 },

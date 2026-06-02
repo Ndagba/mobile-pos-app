@@ -778,6 +778,41 @@ export default function InventoryScreen() {
   // ─── Product details state for tablet view ─────────────────
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
+  // Segmented tab control (Products / Categories / Low Stock) — shared between
+  // the phone layout and the tablet master-detail layout so both can switch tabs.
+  const renderSegmentBar = () => (
+    <View style={styles.segmentBar}>
+      {(['products', 'categories', 'low-stock'] as TabKey[]).map(tab => {
+        const labels: Record<TabKey, string> = {
+          products: 'Products',
+          categories: 'Categories',
+          'low-stock': 'Low Stock',
+        };
+        const active = activeTab === tab;
+        const count = tabCounts[tab];
+        return (
+          <TouchableOpacity
+            key={tab}
+            style={[styles.segment, active && styles.segmentActive]}
+            onPress={() => setActiveTab(tab)}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+              {labels[tab]}
+            </Text>
+            {count > 0 && (
+              <View style={[styles.segBadge, active && styles.segBadgeActive]}>
+                <Text style={[styles.segBadgeText, active && styles.segBadgeTextActive]}>
+                  {count}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+
   // ─── Render ───────────────────────────────────────────────
   // Tablet master-detail layout
   if (isTablet && activeTab === 'products') {
@@ -821,6 +856,10 @@ export default function InventoryScreen() {
               )}
             </View>
           )}
+
+          {/* Segmented tabs — lets the tablet switch between Products,
+              Categories and Low Stock (was previously phone-only). */}
+          {renderSegmentBar()}
 
           {/* Branch filter */}
           {isAdmin && branches.length > 0 && (

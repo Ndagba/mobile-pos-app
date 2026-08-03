@@ -1,9 +1,8 @@
 import { subscriptionService } from '../services/SubscriptionService';
 import { getPaystackService } from '../services/PaystackSubscriptionService';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { addDays } from 'date-fns';
 
-const prisma = new PrismaClient();
 
 /**
  * Daily subscription renewal check
@@ -246,20 +245,16 @@ export async function updateExpiredSubscriptionStatus() {
 
     const now = new Date();
 
-    // Find subscriptions that have expired
+    // Find subscriptions that have expired.
+    // A subscription is expired when status=active AND next_renewal_at is past
+    // AND the trial window (if any) has also closed.
     const expired = await prisma.subscription.findMany({
       where: {
-        AND: [
-          { status: 'active' },
-          { next_renewal_at: { lt: now } },
-          {
-            trial_ends_at: {
-              OR: [
-                { lt: now },
-                { equals: null },
-              ],
-            },
-          },
+        status: 'active',
+        next_renewal_at: { lt: now },
+        OR: [
+          { trial_ends_at: null },
+          { trial_ends_at: { lt: now } },
         ],
       },
       include: {
@@ -277,13 +272,14 @@ export async function updateExpiredSubscriptionStatus() {
           data: { status: 'expired' },
         });
 
-        // Mark store as inactive
+        // Mark store as inactive (use store_id directly — always present on
+        // the subscription row, no need to dereference the included relation).
         await prisma.store.update({
-          where: { id: subscription.store.id },
+          where: { id: subscription.store_id },
           data: { is_active: false },
         });
 
-        console.log(`[Cron] Marked store ${subscription.store.id} as inactive`);
+        console.log(`[Cron] Marked store ${subscription.store_id} as inactive`);
       } catch (error) {
         console.error(
           `[Cron] Error updating status for subscription ${subscription.id}:`,

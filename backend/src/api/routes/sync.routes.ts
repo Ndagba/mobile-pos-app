@@ -1,10 +1,9 @@
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../../lib/prisma';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { catchAsync, AppError } from '../../utils/errorHandler';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 router.use(authMiddleware);
 
@@ -110,8 +109,12 @@ router.get(
 router.get(
   '/offline-transactions',
   catchAsync(async (req: Request, res: Response) => {
+    const user = (req as any).user;
+    const storeWhere: any = { is_sync_online: false };
+    if (user?.storeId) storeWhere.store_id = user.storeId;
+
     const offlineTransactions = await prisma.transaction.findMany({
-      where: { is_sync_online: false },
+      where: storeWhere,
       include: { transaction_items: true },
       orderBy: { created_at: 'asc' }
     });

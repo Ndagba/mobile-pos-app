@@ -1,8 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../../lib/prisma';
+import { redis } from '../../lib/redis';
 import { InventoryService } from '../../services/InventoryService';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { catchAsync, AppError } from '../../utils/errorHandler';
+import { getAuthorizedBranchId, getAuthorizedBranchIds } from '../../utils/branchHelper';
 
 const router = Router();
 
@@ -12,11 +14,17 @@ router.use(authMiddleware);
 router.get(
   '/',
   catchAsync(async (req: Request, res: Response) => {
-    const inventory = await InventoryService.getInventoryStatus((req as any).user.storeId);
+    const { cursor, limit = '30' } = req.query;
+    const result = await InventoryService.getInventoryStatus(
+      (req as any).user.storeId,
+      cursor as string | undefined,
+      parseInt(limit as string, 10)
+    );
 
     res.json({
       status: 'success',
-      data: inventory
+      data: result.items,
+      nextCursor: result.nextCursor
     });
   })
 );
@@ -30,14 +38,8 @@ router.get(
   '/low-stock',
   catchAsync(async (req: Request, res: Response) => {
     const user = (req as any).user;
-    const role: string | undefined = user?.role;
-
-    const branchId: string | null =
-      role === 'admin'
-        ? ((req.query.branch_id as string) || null)
-        : (user?.branchId ?? null);
-
-    const alerts = await InventoryService.getLowStockAlerts(user.storeId, branchId);
+    const branchIds = await getAuthorizedBranchIds(req);
+    const alerts = await InventoryService.getLowStockAlerts(user.storeId, branchIds);
 
     res.json({
       status: 'success',
@@ -106,6 +108,17 @@ router.patch(
         data: { low_stock_threshold: thresholdBigInt },
       });
       updatedCount = result.count;
+    }
+
+    // Invalidate the cached inventory list for this store so the new
+    // threshold (and any status recalculated from it) shows up immediately
+    // instead of waiting out the cache TTL.
+    if (storeId) {
+      try {
+        await redis.del(`inventory:${storeId}:first:30`);
+      } catch (error) {
+        // Non-fatal — the cache will still expire on its own TTL.
+      }
     }
 
     res.json({
@@ -214,6 +227,55 @@ router.get(
     res.json({
       status: 'success',
       data: result
+    });
+  })
+);
+// Get inventory movements (ledger)
+router.get(
+  '/movements',
+  catchAsync(async (req: Request, res: Response) => {
+    const user = (req as any).user;
+    const { product_id, branch_id, dateFrom, dateTo, type, limit = '50', offset = '0' } = req.query;
+
+    const where: any = { store_id: user.storeId };
+    
+    if (product_id) where.product_id = product_id as string;
+    const branchIds = await getAuthorizedBranchIds(req);
+    where.branch_id = { in: branchIds };
+    
+    if (type) where.movement_type = type as string;
+
+    if (dateFrom || dateTo) {
+      where.timestamp = {};
+      if (dateFrom) where.timestamp.gte = new Date(dateFrom as string);
+      if (dateTo) where.timestamp.lte = new Date(dateTo as string);
+    }
+
+    const [movements, total] = await Promise.all([
+      prisma.inventoryMovement.findMany({
+        where,
+        include: {
+          product: { select: { name: true, sku: true } },
+          user: { select: { first_name: true, last_name: true } }
+        },
+        orderBy: { timestamp: 'desc' },
+        take: parseInt(limit as string, 10),
+        skip: parseInt(offset as string, 10)
+      }),
+      prisma.inventoryMovement.count({ where })
+    ]);
+
+    res.json({
+      status: 'success',
+      data: movements.map(m => ({
+        ...m,
+        quantity: Number(m.quantity)
+      })),
+      pagination: {
+        total,
+        limit: parseInt(limit as string, 10),
+        offset: parseInt(offset as string, 10)
+      }
     });
   })
 );

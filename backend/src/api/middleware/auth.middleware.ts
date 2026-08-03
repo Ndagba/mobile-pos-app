@@ -10,8 +10,13 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
       throw new AppError(401, 'No authorization token provided');
     }
 
-    const decoded = AuthService.validateToken(token);
-    (req as any).user = decoded;
+    const decoded = await AuthService.validateToken(token) as any;
+
+    (req as any).user = {
+      ...decoded,
+      id: decoded.userId || decoded.id,
+      userId: decoded.userId || decoded.id
+    };
     next();
   } catch (error) {
     if (error instanceof AppError) {

@@ -1,9 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { getPaystackService } from '../../services/PaystackSubscriptionService';
 import { subscriptionService } from '../../services/SubscriptionService';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../../lib/prisma';
 
-const prisma = new PrismaClient();
 const router = Router();
 
 /**

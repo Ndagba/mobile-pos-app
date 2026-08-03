@@ -2,8 +2,36 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../../lib/prisma';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { catchAsync, AppError } from '../../utils/errorHandler';
+import { getAuthorizedBranchId, getAuthorizedBranchIds } from '../../utils/branchHelper';
+import { processAndSaveImage } from '../../utils/imageProcessor';
 
 const router = Router();
+
+// POST /v1/products/upload-image (authenticated admin/manager)
+router.post(
+  '/upload-image',
+  authMiddleware,
+  catchAsync(async (req: Request, res: Response) => {
+    const user = (req as any).user;
+    const requesterRole = user?.role;
+    if (!['admin', 'manager'].includes(requesterRole ?? '')) {
+      throw new AppError(403, 'Only admins or managers can upload product images');
+    }
+
+    const { image } = req.body;
+    if (!image) {
+      throw new AppError(400, 'Image data (base64 string) is required');
+    }
+
+    const storeId = user.storeId || 'default';
+    const result = await processAndSaveImage(image, storeId);
+
+    res.json({
+      status: 'success',
+      data: result
+    });
+  })
+);
 
 import { v4 as uuidv4 } from 'uuid';
 
@@ -12,32 +40,23 @@ router.get(
   '/',
   authMiddleware,
   catchAsync(async (req: Request, res: Response) => {
-    const { limit = '100', offset = '0', category_id, search } = req.query;
+    const { offset = '0', category_id, search } = req.query;
+    const requestedLimit = parseInt((req.query.limit as string) ?? '30', 10);
+    const MAX_LIMIT = 10000;
+    const limit = String(
+      isNaN(requestedLimit) || requestedLimit < 1
+        ? 30
+        : Math.min(requestedLimit, MAX_LIMIT)
+    );
 
     const user = (req as any).user;
-    const role: string | undefined = user?.role;
-    const branchId: string | null = user?.branchId ?? null;
     const storeId: string | null = user?.storeId ?? null;
 
     const where: any = { is_active: true };
 
-    // Branch filtering.
-    //   • Admin: store-level role. A specific ?branch_id filters to that branch;
-    //     WITHOUT it the admin sees the whole store ("All Branches"). The admin's
-    //     own JWT branch must NOT scope the list, otherwise "All Branches" would
-    //     silently collapse to just the admin's home branch.
-    //   • Manager / cashier: always scoped to their JWT branch.
-    if (role === 'admin') {
-      if (req.query.branch_id) {
-        where.branch_id = req.query.branch_id as string;
-      } else if (storeId) {
-        where.branch = { store_id: storeId };
-      }
-    } else if (branchId) {
-      where.branch_id = branchId;
-    } else if (storeId) {
-      where.branch = { store_id: storeId };
-    }
+    // Branch filtering
+    const branchIds = await getAuthorizedBranchIds(req);
+    where.branch_id = { in: branchIds };
 
     if (category_id) {
       where.category_id = category_id;
@@ -127,10 +146,19 @@ router.post(
     // Determine branchId. Admins explicitly choose the target branch in the UI,
     // so an admin's body.branch_id MUST win over their own JWT branch. Managers/
     // cashiers are pinned to their JWT branch.
-    const branchId: string | null =
+    let branchId: string | null =
       requesterRole === 'admin'
         ? (req.body.branch_id ?? user?.branchId ?? null)
         : (user?.branchId ?? req.body.branch_id ?? null);
+
+    if (!branchId && user?.storeId) {
+      const activeBranches = await prisma.branch.findMany({
+        where: { store_id: user.storeId, is_active: true }
+      });
+      if (activeBranches.length === 1) {
+        branchId = activeBranches[0].id;
+      }
+    }
 
     if (!branchId) {
       throw new AppError(400, 'branch_id is required (assign the user to a branch or pass branch_id in request body)');
@@ -192,7 +220,7 @@ router.post(
         data: {
           id: uuidv4(),
           product_id: productId,
-          quantity_on_hand: BigInt(initial_quantity ?? 0),
+          quantity_on_hand: BigInt(Math.max(0, Number(initial_quantity ?? 0))),
           low_stock_threshold: BigInt(resolvedThreshold),
           reorder_point: BigInt(Math.max(resolvedThreshold, 20))
         }
@@ -333,8 +361,6 @@ router.get(
     }
 
     const user = (req as any).user;
-    const role: string | undefined = user?.role;
-    const branchId: string | null = user?.branchId ?? null;
     const storeId: string | null = user?.storeId ?? null;
 
     const where: any = {
@@ -347,18 +373,9 @@ router.get(
       ]
     };
 
-    // Branch filtering (same logic as the main list endpoint)
-    if (role === 'admin') {
-      if (req.query.branch_id) {
-        where.branch_id = req.query.branch_id as string;
-      } else if (storeId) {
-        where.branch = { store_id: storeId };
-      }
-    } else if (branchId) {
-      where.branch_id = branchId;
-    } else if (storeId) {
-      where.branch = { store_id: storeId };
-    }
+    // Branch filtering
+    const branchIds = await getAuthorizedBranchIds(req);
+    where.branch_id = { in: branchIds };
 
     if (category_id) {
       where.category_id = category_id;
@@ -373,7 +390,7 @@ router.get(
     const [results, total] = await Promise.all([
       prisma.product.findMany({
         where,
-        include: { category: true },
+        include: { category: true, inventory: true },
         take: parseInt(limit as string),
         skip: parseInt(offset as string)
       }),
@@ -603,8 +620,8 @@ router.post(
           summary.products_created++;
         }
 
-        const stock = parseInt(row.initial_stock || '0', 10) || 0;
-        const lowThreshold = parseInt(row.low_stock_threshold || '10', 10) || 10;
+        const stock = Math.max(0, parseInt(row.initial_stock || '0', 10) || 0);
+        const lowThreshold = Math.max(0, parseInt(row.low_stock_threshold || '10', 10) || 10);
         await prisma.inventory.upsert({
           where: { product_id: product.id },
           update: { quantity_on_hand: stock, low_stock_threshold: lowThreshold },

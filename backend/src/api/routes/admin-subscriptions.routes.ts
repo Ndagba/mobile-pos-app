@@ -1,10 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { subscriptionService } from '../../services/SubscriptionService';
 import { authMiddleware } from '../middleware/auth.middleware';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../../lib/prisma';
 import { addDays, addMonths } from 'date-fns';
 
-const prisma = new PrismaClient();
 const router = Router();
 
 // All admin routes require authentication

@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma';
 import { v4 as uuidv4 } from 'uuid';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { catchAsync, AppError } from '../../utils/errorHandler';
+import { getAuthorizedBranchId, getAuthorizedBranchIds } from '../../utils/branchHelper';
 
 const router = Router();
 
@@ -18,21 +19,9 @@ router.get(
 
     const where: any = { is_active: true };
 
-    // Branch filtering — same hierarchy as products:
-    //   • Admin: explicit ?branch_id filters to that branch; without it the admin
-    //     sees the whole store. The admin's own JWT branch must NOT scope the list.
-    //   • Manager / cashier: always scoped to their JWT branch.
-    if (role === 'admin') {
-      if (req.query.branch_id) {
-        where.branch_id = req.query.branch_id as string;
-      } else if (storeId) {
-        where.branch = { store_id: storeId };
-      }
-    } else if (branchId) {
-      where.branch_id = branchId;
-    } else if (storeId) {
-      where.branch = { store_id: storeId };
-    }
+    // Branch filtering
+    const branchIds = await getAuthorizedBranchIds(req);
+    where.branch_id = { in: branchIds };
 
     const categories = await prisma.category.findMany({
       where,
@@ -82,10 +71,19 @@ router.post(
     // their own JWT branch — otherwise every category lands on the admin's home
     // branch regardless of what they selected. Managers/cashiers are pinned to
     // their JWT branch.
-    const branchId: string | null =
+    let branchId: string | null =
       role === 'admin'
         ? (req.body.branch_id ?? user?.branchId ?? null)
         : (user?.branchId ?? req.body.branch_id ?? null);
+
+    if (!branchId && user?.storeId) {
+      const activeBranches = await prisma.branch.findMany({
+        where: { store_id: user.storeId, is_active: true }
+      });
+      if (activeBranches.length === 1) {
+        branchId = activeBranches[0].id;
+      }
+    }
 
     if (!branchId) {
       throw new AppError(400, 'branch_id is required (assign the user to a branch or pass branch_id in request body)');

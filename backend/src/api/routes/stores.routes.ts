@@ -1,12 +1,11 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../../lib/prisma';
 import bcryptjs from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { catchAsync, AppError } from '../../utils/errorHandler';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 router.use(authMiddleware);
 

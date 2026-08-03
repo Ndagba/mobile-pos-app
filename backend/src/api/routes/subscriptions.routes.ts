@@ -2,9 +2,8 @@ import { Router, Request, Response } from 'express';
 import { subscriptionService } from '../../services/SubscriptionService';
 import { getPaystackService } from '../../services/PaystackSubscriptionService';
 import { authMiddleware } from '../middleware/auth.middleware';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../../lib/prisma';
 
-const prisma = new PrismaClient();
 const router = Router();
 
 // Get available subscription plans (public endpoint)

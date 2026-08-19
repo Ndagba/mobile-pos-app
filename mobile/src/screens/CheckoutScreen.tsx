@@ -8,12 +8,14 @@ import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/nativ
 import { useDispatch, useSelector } from 'react-redux';
 import * as SecureStore from 'expo-secure-store';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { RootState } from '../redux/store';
 import { addItem, removeItem, updateQuantity, clearCart } from '../redux/slices/cartSlice';
 import { TransactionService, TransactionInput } from '../services/TransactionService';
 import { setSyncMode, addToSyncQueue } from '../redux/slices/syncSlice';
-import ApiClient from '../services/ApiClient';
+import ApiClient, { API_BASE_URL } from '../services/ApiClient';
+import { CachedImage } from '../components/ui/CachedImage';
 import DatabaseService from '../services/DatabaseService';
 import NotificationService from '../services/NotificationService';
 import { generateId } from '../utils/generateId';
@@ -98,8 +100,10 @@ export default function CheckoutScreen() {
   const cart        = useSelector((state: RootState) => state.cart);
   const auth        = useSelector((state: RootState) => state.auth);
   const sync        = useSelector((state: RootState) => state.sync);
+  const settings    = useSelector((state: RootState) => state.settings.settings);
   const user        = auth.user;
-  const isAdmin     = user?.role === 'admin';
+  const isAdmin     = ['admin', 'manager'].includes(user?.role ?? '');
+  const isCustomerEnabled = settings?.customer_menu_enabled ?? true;
   const { isTablet, deviceType } = useResponsive();
   const spacing = responsiveSpacing(deviceType);
   const fontSize = responsiveFontSize(deviceType);
@@ -156,7 +160,12 @@ export default function CheckoutScreen() {
     try {
       const res: any = await ApiClient.get('/branches');
       const list: Branch[] = Array.isArray(res) ? res : res?.data ?? [];
-      setBranches(list.filter((b: Branch) => b.is_active));
+      const activeBranches = list.filter((b: Branch) => b.is_active);
+      setBranches(activeBranches);
+      if (activeBranches.length === 1) {
+        selectedBranchRef.current = activeBranches[0].id;
+        setSelectedBranchId(activeBranches[0].id);
+      }
     } catch {}
   };
 
@@ -195,9 +204,27 @@ export default function CheckoutScreen() {
 
   const handleAdd    = (p: any) => {
     if (!p?.id || !p?.name) { Alert.alert('Error', 'Product data missing'); return; }
+    const stock = Number(p.inventory?.quantity_on_hand ?? 0);
+    if (stock <= 0) {
+      Alert.alert('Out of Stock', `${p.name} is out of stock`);
+      return;
+    }
+    const inCart = cart.items.find(c => c.product_id === p.id);
+    if (inCart && inCart.quantity >= stock) {
+      Alert.alert('Limit Reached', `Only ${stock} units available in stock`);
+      return;
+    }
     dispatch(addItem({ product_id: p.id, product_name: p.name, quantity: 1, unit_price: Number(p.effective_price) || 0, tax_rate: Number(p.tax_rate) || 0 }));
   };
-  const handleInc    = (id: string, qty: number) => dispatch(updateQuantity({ product_id: id, quantity: qty + 1 }));
+  const handleInc    = (id: string, qty: number) => {
+    const product = products.find(p => p.id === id);
+    const stock = Number(product?.inventory?.quantity_on_hand ?? 0);
+    if (qty >= stock) {
+      Alert.alert('Limit Reached', `Only ${stock} units available in stock`);
+      return;
+    }
+    dispatch(updateQuantity({ product_id: id, quantity: qty + 1 }));
+  };
   const handleDec    = (id: string, qty: number) => { if (qty <= 1) dispatch(removeItem(id)); else dispatch(updateQuantity({ product_id: id, quantity: qty - 1 })); };
 
   const handleSelectCustomer = (customer: Customer) => {
@@ -223,18 +250,24 @@ export default function CheckoutScreen() {
   const handleCharge = async () => {
     if (!selectedPayment) { Alert.alert('Select Payment', 'Choose a payment method first'); return; }
     if (cart.items.length === 0) { Alert.alert('Empty Cart', 'Add at least one product'); return; }
-    if (isAdmin && !selectedBranchRef.current) { Alert.alert('Select Branch', 'Choose a specific branch before processing.'); return; }
+
+    let finalBranchId = selectedBranchRef.current;
+    if (isAdmin && !finalBranchId && branches.length === 1) {
+      finalBranchId = branches[0].id;
+    }
+
+    if (isAdmin && !finalBranchId) { Alert.alert('Select Branch', 'Choose a specific branch before processing.'); return; }
     if (!isAdmin && !user?.branch_id) { Alert.alert('No Branch Assigned', 'Your account has no branch assigned. Please contact your administrator before making a sale.'); return; }
 
     setProcessing(true);
     try {
       const branchName = isAdmin
-        ? branches.find(b => b.id === selectedBranchRef.current)?.name
+        ? branches.find(b => b.id === finalBranchId)?.name
         : user?.branch_name ?? undefined;
 
       const input: TransactionInput = {
         store_id: user?.store_id || 'store_001', user_id: user?.id || 'user_123',
-        branch_id: isAdmin ? selectedBranchRef.current : (user?.branch_id || undefined),
+        branch_id: isAdmin ? finalBranchId : (user?.branch_id || undefined),
         customer_id: selectedCustomer?.id || undefined,
         items: cart.items.map(it => ({
           product_id: it.product_id,
@@ -279,33 +312,40 @@ export default function CheckoutScreen() {
 
   const handlePrintReceipt = async () => {
     if (!receipt) return;
-    const lines = [
-      '================================',
-      `       ${user?.first_name ?? 'Mobile POS'}`,
-      receipt.branch_name ? `       ${receipt.branch_name}` : '',
-      '================================',
-      `Receipt: ${receipt.receipt_number}`,
-      `Date:    ${receipt.timestamp}`,
-      '--------------------------------',
-      ...receipt.items.map(i => `${i.product_name}\n  ${i.quantity} x ₦${i.unit_price.toLocaleString()} = ₦${i.line_total.toLocaleString()}`),
-      '--------------------------------',
-      `Subtotal:  ₦${receipt.subtotal.toLocaleString()}`,
-      `VAT:       ₦${receipt.tax_amount.toLocaleString()}`,
-      receipt.discount_amount > 0 ? `Discount:  -₦${receipt.discount_amount.toLocaleString()}` : '',
-      `TOTAL:     ₦${receipt.total.toLocaleString()}`,
-      `Payment:   ${receipt.payment_method === 'mobile_wallet' ? 'TRANSFER' : receipt.payment_method.toUpperCase()}`,
-      '================================',
-      '   Thank you for your purchase!',
-      '================================',
-    ].filter(Boolean).join('\n');
-    try { await Share.share({ message: lines, title: `Receipt ${receipt.receipt_number}` }); } catch {}
+    try {
+      const bizName = await AsyncStorage.getItem('@pos_business_name') || '';
+      const footerMsg = await AsyncStorage.getItem('@pos_receipt_footer') || 'Thank you for your purchase!';
+      const lines = [
+        bizName ? bizName : '',
+        '===== RECEIPT =====',
+        receipt.branch_name ? `Branch:  ${receipt.branch_name}` : '',
+        `Receipt: ${receipt.receipt_number}`,
+        `Date:    ${receipt.timestamp}`,
+        '--------------------------------',
+        ...receipt.items.map(i => `${i.product_name}\n  ${i.quantity} x ₦${i.unit_price.toLocaleString()} = ₦${i.line_total.toLocaleString()}`),
+        '--------------------------------',
+        `Subtotal:  ₦${receipt.subtotal.toLocaleString()}`,
+        `VAT:       ₦${receipt.tax_amount.toLocaleString()}`,
+        receipt.discount_amount > 0 ? `Discount:  -₦${receipt.discount_amount.toLocaleString()}` : '',
+        `TOTAL:     ₦${receipt.total.toLocaleString()}`,
+        `Payment:   ${receipt.payment_method === 'mobile_wallet' ? 'TRANSFER' : receipt.payment_method.toUpperCase()}`,
+        '================================',
+        footerMsg ? footerMsg : '',
+      ].filter(Boolean).join('\n');
+      await Share.share({ message: lines, title: `Receipt ${receipt.receipt_number}` });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const filtered   = products.filter(p => !searchQuery || p.name?.toLowerCase().includes(searchQuery.toLowerCase()) || p.sku?.toLowerCase().includes(searchQuery.toLowerCase()));
   const cartCount  = cart.items.reduce((s, i) => s + i.quantity, 0);
-  const activeBranch = isAdmin
-    ? (selectedBranchId ? branches.find(b => b.id === selectedBranchId)?.name : null)
-    : user?.branch_name ?? null;
+  const activeBranch = branches.length === 1
+    ? branches[0].name
+    : (isAdmin
+        ? (selectedBranchId ? branches.find(b => b.id === selectedBranchId)?.name : null)
+        : user?.branch_name ?? null
+      );
 
   // ── Tablet layout with side-by-side product + cart ────
   if (isTablet) {
@@ -351,7 +391,8 @@ export default function CheckoutScreen() {
             ItemSeparatorComponent={() => <View style={{ height: spacing.md }} />}
             renderItem={({ item }) => {
               const inCart = cart.items.find(c => c.product_id === item.id);
-              const isLow = Number(item.inventory?.quantity_on_hand ?? 0) <= 10;
+              const stock = Number(item.inventory?.quantity_on_hand ?? 0);
+              const isLow = stock <= 10;
               const tone = getCategoryTone(item.category?.name);
               return (
                 <View style={[s.prodCard, inCart ? { borderColor: tone + '55' } : null]}>
@@ -361,17 +402,34 @@ export default function CheckoutScreen() {
                       <Text style={[s.prodCatLabel, { color: tone, fontSize: fontSize.xs }]} numberOfLines={1}>
                         {item.category?.name ?? ''}
                       </Text>
-                      {isLow && <View style={s.lowBadge}><Text style={[s.lowText, { fontSize: fontSize.xs }]}>LOW</Text></View>}
+                      {isLow && stock > 0 && <View style={s.lowBadge}><Text style={[s.lowText, { fontSize: fontSize.xs }]}>LOW</Text></View>}
                     </View>
-                    <Text style={[s.prodName, { fontSize: fontSize.base }]} numberOfLines={2}>{item.name}</Text>
+                    <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', minHeight: 50 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[s.prodName, { fontSize: fontSize.base }]} numberOfLines={2}>{item.name}</Text>
+                        <Text style={{ fontSize: 11, color: stock > 0 ? C.muted : '#FB7185', fontWeight: stock > 0 ? 'normal' : '700', marginTop: 4 }}>
+                          {stock > 0 ? `Stock: ${stock}` : 'Out of Stock'}
+                        </Text>
+                      </View>
+                      {item.image_url && (
+                        <CachedImage
+                          source={`${API_BASE_URL.replace('/v1', '')}${item.image_url}`}
+                          style={{ width: 50, height: 50, borderRadius: 8, backgroundColor: C.border }}
+                        />
+                      )}
+                    </View>
                     <View style={s.prodFoot}>
                       <Text style={[s.prodPrice, { fontSize: fontSize.lg }]}>
                         <Text style={{ color: C.muted }}>₦</Text>
                         {(Number(item.effective_price) || 0).toLocaleString()}
                       </Text>
                       {!inCart ? (
-                        <TouchableOpacity onPress={() => handleAdd(item)} style={s.addBtn}>
-                          <MaterialCommunityIcons name="plus" size={18} color={C.accentFg} />
+                        <TouchableOpacity 
+                          onPress={() => handleAdd(item)} 
+                          style={[s.addBtn, stock <= 0 ? { backgroundColor: C.border } : null]}
+                          disabled={stock <= 0}
+                        >
+                          <MaterialCommunityIcons name="plus" size={18} color={stock > 0 ? C.accentFg : C.muted} />
                         </TouchableOpacity>
                       ) : (
                         <View style={s.qtyRow}>
@@ -379,7 +437,11 @@ export default function CheckoutScreen() {
                             <MaterialCommunityIcons name="minus" size={14} color={C.accent} />
                           </TouchableOpacity>
                           <Text style={[s.qtyNum, { fontSize: fontSize.sm }]}>{inCart.quantity}</Text>
-                          <TouchableOpacity onPress={() => handleInc(item.id, inCart.quantity)} style={s.qtyBtn}>
+                          <TouchableOpacity 
+                            onPress={() => handleInc(item.id, inCart.quantity)} 
+                            style={[s.qtyBtn, inCart.quantity >= stock ? { opacity: 0.5 } : null]}
+                            disabled={inCart.quantity >= stock}
+                          >
                             <MaterialCommunityIcons name="plus" size={14} color={C.accent} />
                           </TouchableOpacity>
                         </View>
@@ -413,37 +475,46 @@ export default function CheckoutScreen() {
             {/* Cart items */}
             {cartCount > 0 && (
               <View style={{ paddingHorizontal: spacing.lg, paddingVertical: spacing.md }}>
-                {cart.items.map((it, i) => (
-                  <View key={it.product_id} style={[i < cart.items.length - 1 && { borderBottomWidth: 1, borderBottomColor: C.border, paddingBottom: spacing.md }]}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.md }}>
-                      <View style={[s.cartAvatar, { width: 32, height: 32 }]}>
-                        <Text style={[s.cartAvatarLetter, { fontSize: fontSize.base }]}>{it.product_name.charAt(0).toUpperCase()}</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[s.cartName, { fontSize: fontSize.sm }]} numberOfLines={1}>{it.product_name}</Text>
-                        <Text style={[s.cartSub, { fontSize: fontSize.xs }]}>{it.quantity} × ₦{it.unit_price.toLocaleString()}</Text>
-                      </View>
-                      <TouchableOpacity
-                        onPress={() => dispatch(removeItem(it.product_id))}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      >
-                        <MaterialCommunityIcons name="close" size={16} color={C.muted} />
-                      </TouchableOpacity>
-                    </View>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <Text style={[s.cartTotal, { fontSize: fontSize.sm }]}>₦{(it.unit_price * it.quantity).toLocaleString()}</Text>
-                      <View style={[s.qtyRow, { gap: spacing.sm }]}>
-                        <TouchableOpacity onPress={() => handleDec(it.product_id, it.quantity)} style={[s.qtyBtn, { width: 24, height: 24 }]}>
-                          <MaterialCommunityIcons name="minus" size={12} color={C.accent} />
-                        </TouchableOpacity>
-                        <Text style={[s.qtyNum, { fontSize: fontSize.xs }]}>{it.quantity}</Text>
-                        <TouchableOpacity onPress={() => handleInc(it.product_id, it.quantity)} style={[s.qtyBtn, { width: 24, height: 24 }]}>
-                          <MaterialCommunityIcons name="plus" size={12} color={C.accent} />
+                {cart.items.map((it, i) => {
+                  const product = products.find(p => p.id === it.product_id);
+                  const stock = Number(product?.inventory?.quantity_on_hand ?? 0);
+                  const cannotInc = it.quantity >= stock;
+                  return (
+                    <View key={it.product_id} style={[i < cart.items.length - 1 && { borderBottomWidth: 1, borderBottomColor: C.border, paddingBottom: spacing.md }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.md }}>
+                        <View style={[s.cartAvatar, { width: 32, height: 32 }]}>
+                          <Text style={[s.cartAvatarLetter, { fontSize: fontSize.base }]}>{it.product_name.charAt(0).toUpperCase()}</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[s.cartName, { fontSize: fontSize.sm }]} numberOfLines={1}>{it.product_name}</Text>
+                          <Text style={[s.cartSub, { fontSize: fontSize.xs }]}>{it.quantity} × ₦{it.unit_price.toLocaleString()}</Text>
+                        </View>
+                        <TouchableOpacity
+                          onPress={() => dispatch(removeItem(it.product_id))}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <MaterialCommunityIcons name="close" size={16} color={C.muted} />
                         </TouchableOpacity>
                       </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Text style={[s.cartTotal, { fontSize: fontSize.sm }]}>₦{(it.unit_price * it.quantity).toLocaleString()}</Text>
+                        <View style={[s.qtyRow, { gap: spacing.sm }]}>
+                          <TouchableOpacity onPress={() => handleDec(it.product_id, it.quantity)} style={[s.qtyBtn, { width: 24, height: 24 }]}>
+                            <MaterialCommunityIcons name="minus" size={12} color={C.accent} />
+                          </TouchableOpacity>
+                          <Text style={[s.qtyNum, { fontSize: fontSize.xs }]}>{it.quantity}</Text>
+                          <TouchableOpacity 
+                            onPress={() => handleInc(it.product_id, it.quantity)} 
+                            style={[s.qtyBtn, { width: 24, height: 24 }, cannotInc ? { opacity: 0.5 } : null]}
+                            disabled={cannotInc}
+                          >
+                            <MaterialCommunityIcons name="plus" size={12} color={C.accent} />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
           </ScrollView>
@@ -452,7 +523,7 @@ export default function CheckoutScreen() {
           {cartCount > 0 && (
             <View style={{ borderTopWidth: 1, borderTopColor: C.border, paddingHorizontal: spacing.lg, paddingVertical: spacing.lg, backgroundColor: C.bg }}>
               {/* Branch selector */}
-              {isAdmin && (
+              {isAdmin && branches.length > 1 && (
                 <TouchableOpacity
                   onPress={() => setBranchDropdownOpen(true)}
                   style={[s.customerBtn, { marginBottom: spacing.md }]}
@@ -470,8 +541,13 @@ export default function CheckoutScreen() {
               {/* Customer selector */}
               <TouchableOpacity
                 onPress={() => setShowCustomerModal(true)}
-                style={[s.customerBtn, { marginBottom: spacing.md }]}
-                activeOpacity={0.7}
+                style={[
+                  s.customerBtn,
+                  { marginBottom: spacing.md },
+                  (!isCustomerEnabled && user?.role === 'cashier') && { opacity: 0.5 }
+                ]}
+                activeOpacity={(!isCustomerEnabled && user?.role === 'cashier') ? 1 : 0.7}
+                disabled={!isCustomerEnabled && user?.role === 'cashier'}
               >
                 <MaterialCommunityIcons
                   name={selectedCustomer ? 'account' : 'account-plus-outline'}
@@ -482,7 +558,9 @@ export default function CheckoutScreen() {
                   <Text style={[s.customerBtnText, { fontSize: fontSize.sm }]}>
                     {selectedCustomer
                       ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}`
-                      : 'Add customer'}
+                      : (!isCustomerEnabled && user?.role === 'cashier')
+                        ? 'Customer selection disabled'
+                        : 'Add customer'}
                   </Text>
                   {selectedCustomer && selectedCustomer.credit_limit && (
                     <Text style={[s.customerBtnSub, { fontSize: fontSize.xs }]}>
@@ -688,7 +766,7 @@ export default function CheckoutScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
             <Text style={s.headerSub}>{cartCount} {cartCount === 1 ? 'item' : 'items'}</Text>
             {(isAdmin || activeBranch) && <Text style={s.headerSub}>·</Text>}
-            {isAdmin ? (
+            {isAdmin && branches.length > 1 ? (
               <TouchableOpacity
                 onPress={() => setBranchDropdownOpen(true)}
                 style={s.branchPill}
@@ -746,7 +824,8 @@ export default function CheckoutScreen() {
         }
         renderItem={({ item }) => {
           const inCart = cart.items.find(c => c.product_id === item.id);
-          const isLow  = Number(item.inventory?.quantity_on_hand ?? 0) <= 10;
+          const stock = Number(item.inventory?.quantity_on_hand ?? 0);
+          const isLow  = stock <= 10;
           const tone   = getCategoryTone(item.category?.name);
           return (
             <View style={[s.prodCard, inCart ? { borderColor: tone + '55' } : null]}>
@@ -758,10 +837,23 @@ export default function CheckoutScreen() {
                   <Text style={[s.prodCatLabel, { color: tone }]} numberOfLines={1}>
                     {item.category?.name ?? ''}
                   </Text>
-                  {isLow && <View style={s.lowBadge}><Text style={s.lowText}>LOW</Text></View>}
+                  {isLow && stock > 0 && <View style={s.lowBadge}><Text style={s.lowText}>LOW</Text></View>}
                 </View>
-                {/* Product name */}
-                <Text style={s.prodName} numberOfLines={2}>{item.name}</Text>
+                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', minHeight: 50 }}>
+                  <View style={{ flex: 1 }}>
+                    {/* Product name */}
+                    <Text style={s.prodName} numberOfLines={2}>{item.name}</Text>
+                    <Text style={{ fontSize: 11, color: stock > 0 ? C.muted : '#FB7185', fontWeight: stock > 0 ? 'normal' : '700', marginTop: 4 }}>
+                      {stock > 0 ? `Stock: ${stock}` : 'Out of Stock'}
+                    </Text>
+                  </View>
+                  {item.image_url && (
+                    <CachedImage
+                      source={`${API_BASE_URL.replace('/v1', '')}${item.image_url}`}
+                      style={{ width: 50, height: 50, borderRadius: 8, backgroundColor: C.border }}
+                    />
+                  )}
+                </View>
                 {/* Price + qty controls */}
                 <View style={s.prodFoot}>
                   <Text style={s.prodPrice}>
@@ -769,8 +861,12 @@ export default function CheckoutScreen() {
                     {(Number(item.effective_price) || 0).toLocaleString()}
                   </Text>
                   {!inCart ? (
-                    <TouchableOpacity onPress={() => handleAdd(item)} style={s.addBtn}>
-                      <MaterialCommunityIcons name="plus" size={16} color={C.accentFg} />
+                    <TouchableOpacity 
+                      onPress={() => handleAdd(item)} 
+                      style={[s.addBtn, stock <= 0 ? { backgroundColor: C.border } : null]}
+                      disabled={stock <= 0}
+                    >
+                      <MaterialCommunityIcons name="plus" size={16} color={stock > 0 ? C.accentFg : C.muted} />
                     </TouchableOpacity>
                   ) : (
                     <View style={s.qtyRow}>
@@ -778,7 +874,11 @@ export default function CheckoutScreen() {
                         <MaterialCommunityIcons name="minus" size={14} color={C.accent} />
                       </TouchableOpacity>
                       <Text style={s.qtyNum}>{inCart.quantity}</Text>
-                      <TouchableOpacity onPress={() => handleInc(item.id, inCart.quantity)} style={s.qtyBtn}>
+                      <TouchableOpacity 
+                        onPress={() => handleInc(item.id, inCart.quantity)} 
+                        style={[s.qtyBtn, inCart.quantity >= stock ? { opacity: 0.5 } : null]}
+                        disabled={inCart.quantity >= stock}
+                      >
                         <MaterialCommunityIcons name="plus" size={14} color={C.accent} />
                       </TouchableOpacity>
                     </View>
@@ -806,32 +906,37 @@ export default function CheckoutScreen() {
         {/* Expanded cart items */}
         {cartExpanded && cartCount > 0 && (
           <ScrollView style={{ maxHeight: 200, marginBottom: 12 }} showsVerticalScrollIndicator={false}>
-            {cart.items.map(it => (
-              <View key={it.product_id} style={s.cartItem}>
-                <View style={s.cartAvatar}>
-                  <Text style={s.cartAvatarLetter}>{it.product_name.charAt(0).toUpperCase()}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.cartName} numberOfLines={1}>{it.product_name}</Text>
-                  <Text style={s.cartSub}>₦{it.unit_price.toLocaleString()} each</Text>
-                </View>
-                <View style={s.qtyRow}>
-                  <TouchableOpacity
-                    onPress={() => handleDec(it.product_id, it.quantity)}
-                    style={s.qtyBtn}
-                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                  >
-                    <MaterialCommunityIcons name="minus" size={14} color={C.accent} />
-                  </TouchableOpacity>
-                  <Text style={s.qtyNum}>{it.quantity}</Text>
-                  <TouchableOpacity
-                    onPress={() => handleInc(it.product_id, it.quantity)}
-                    style={s.qtyBtn}
-                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                  >
-                    <MaterialCommunityIcons name="plus" size={14} color={C.accent} />
-                  </TouchableOpacity>
-                </View>
+            {cart.items.map(it => {
+              const product = products.find(p => p.id === it.product_id);
+              const stock = Number(product?.inventory?.quantity_on_hand ?? 0);
+              const cannotInc = it.quantity >= stock;
+              return (
+                <View key={it.product_id} style={s.cartItem}>
+                  <View style={s.cartAvatar}>
+                    <Text style={s.cartAvatarLetter}>{it.product_name.charAt(0).toUpperCase()}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.cartName} numberOfLines={1}>{it.product_name}</Text>
+                    <Text style={s.cartSub}>₦{it.unit_price.toLocaleString()} each</Text>
+                  </View>
+                  <View style={s.qtyRow}>
+                    <TouchableOpacity
+                      onPress={() => handleDec(it.product_id, it.quantity)}
+                      style={s.qtyBtn}
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    >
+                      <MaterialCommunityIcons name="minus" size={14} color={C.accent} />
+                    </TouchableOpacity>
+                    <Text style={s.qtyNum}>{it.quantity}</Text>
+                    <TouchableOpacity
+                      onPress={() => handleInc(it.product_id, it.quantity)}
+                      style={[s.qtyBtn, cannotInc ? { opacity: 0.5 } : null]}
+                      disabled={cannotInc}
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    >
+                      <MaterialCommunityIcons name="plus" size={14} color={C.accent} />
+                    </TouchableOpacity>
+                  </View>
                 <Text style={s.cartTotal}>₦{(it.unit_price * it.quantity).toLocaleString()}</Text>
                 <TouchableOpacity
                   onPress={() => dispatch(removeItem(it.product_id))}
@@ -841,7 +946,8 @@ export default function CheckoutScreen() {
                   <MaterialCommunityIcons name="close" size={14} color={C.muted} />
                 </TouchableOpacity>
               </View>
-            ))}
+            );
+            })}
           </ScrollView>
         )}
 
@@ -884,8 +990,12 @@ export default function CheckoutScreen() {
         {cartCount > 0 && (
           <TouchableOpacity
             onPress={() => setShowCustomerModal(true)}
-            style={s.customerBtn}
-            activeOpacity={0.7}
+            style={[
+              s.customerBtn,
+              (!isCustomerEnabled && user?.role === 'cashier') && { opacity: 0.5 }
+            ]}
+            activeOpacity={(!isCustomerEnabled && user?.role === 'cashier') ? 1 : 0.7}
+            disabled={!isCustomerEnabled && user?.role === 'cashier'}
           >
             <MaterialCommunityIcons
               name={selectedCustomer ? 'account' : 'account-plus-outline'}
@@ -896,7 +1006,9 @@ export default function CheckoutScreen() {
               <Text style={s.customerBtnText}>
                 {selectedCustomer
                   ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}`
-                  : 'Add customer (optional)'}
+                  : (!isCustomerEnabled && user?.role === 'cashier')
+                    ? 'Customer selection disabled'
+                    : 'Add customer (optional)'}
               </Text>
               {selectedCustomer && selectedCustomer.credit_limit && (
                 <Text style={s.customerBtnSub}>

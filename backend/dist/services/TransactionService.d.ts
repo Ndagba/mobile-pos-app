@@ -116,6 +116,7 @@ export declare class TransactionService {
         dateTo?: Date;
         paymentMethod?: string;
         status?: string;
+        branchId?: string;
     }): Promise<{
         data: {
             item_count: number;
@@ -153,6 +154,7 @@ export declare class TransactionService {
             voided_at: Date | null;
             voided_by: string | null;
         }[];
+        netSum: number;
         pagination: {
             limit: number;
             offset: number;

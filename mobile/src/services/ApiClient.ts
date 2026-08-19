@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/v1';
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/v1';
 
 interface OfflineRequest {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -91,7 +91,11 @@ class ApiClient {
   async get<T>(url: string, config?: any): Promise<T> {
     try {
       const response = await this.axiosInstance.get(url, config);
-      return response.data.data;
+      const data = response.data.data;
+      if (!url.includes('/auth/')) {
+        await this.cacheData(url, data);
+      }
+      return data;
     } catch (error) {
       if (!this.isOnline) {
         // Return cached data if available
@@ -242,9 +246,20 @@ class ApiClient {
     }
   }
 
+  private getStoreId(): string | null {
+    try {
+      const { store } = require('../redux/store');
+      return store.getState().auth.user?.store_id || null;
+    } catch {
+      return null;
+    }
+  }
+
   private async getCachedData(url: string): Promise<any | null> {
     try {
-      const cached = await AsyncStorage.getItem(`cache_${url}`);
+      const storeId = this.getStoreId();
+      const key = storeId ? `cache_${storeId}_${url}` : `cache_${url}`;
+      const cached = await AsyncStorage.getItem(key);
       return cached ? JSON.parse(cached) : null;
     } catch (error) {
       return null;
@@ -253,7 +268,9 @@ class ApiClient {
 
   async cacheData(url: string, data: any) {
     try {
-      await AsyncStorage.setItem(`cache_${url}`, JSON.stringify(data));
+      const storeId = this.getStoreId();
+      const key = storeId ? `cache_${storeId}_${url}` : `cache_${url}`;
+      await AsyncStorage.setItem(key, JSON.stringify(data));
     } catch (error) {
       console.error('Error caching data:', error);
     }

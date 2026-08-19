@@ -1,99 +1,64 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
-const client_1 = require("@prisma/client");
+const prisma_1 = require("../../lib/prisma");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const errorHandler_1 = require("../../utils/errorHandler");
+const branchHelper_1 = require("../../utils/branchHelper");
 const router = (0, express_1.Router)();
-const prisma = new client_1.PrismaClient();
 router.use(auth_middleware_1.authMiddleware);
-// ─── Helpers ──────────────────────────────────────────────────
-/**
- * Build a Prisma `where` clause object for Transaction queries.
- * Priority: branchId > storeId > no filter
- */
-const branchWhere = (branchId, storeId) => {
-    if (branchId)
-        return { branch_id: branchId };
-    if (storeId)
-        return { store_id: storeId };
-    return {};
+const branchWhere = (branchIds, storeId) => {
+    return {
+        store_id: storeId || undefined,
+        branch_id: { in: branchIds }
+    };
 };
 // ─── Dashboard ────────────────────────────────────────────────
 router.get('/dashboard', (0, errorHandler_1.catchAsync)(async (req, res) => {
     const user = req.user;
     const storeId = user?.storeId ?? null;
     const role = user?.role ?? '';
-    // Determine effective branchId: JWT value takes priority; admin can override via query param
-    let effectiveBranchId = user?.branchId ?? null;
-    if (!effectiveBranchId && role === 'admin' && req.query.branch_id) {
-        effectiveBranchId = req.query.branch_id;
-    }
+    // Determine effective branch IDs
+    const branchIds = await (0, branchHelper_1.getAuthorizedBranchIds)(req);
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const weekStart = new Date();
     weekStart.setDate(weekStart.getDate() - 6);
     weekStart.setHours(0, 0, 0, 0);
     // Build where clauses
-    const locationFilter = branchWhere(effectiveBranchId, storeId);
+    const locationFilter = branchWhere(branchIds, storeId);
     const todayWhere = { status: 'completed', created_at: { gte: todayStart }, ...locationFilter };
     const weekWhere = { status: 'completed', created_at: { gte: weekStart }, ...locationFilter };
     // ── Each query gets its own .catch() so one failure never kills the whole endpoint
     const [transactionCount, revenueAgg, itemsAgg, weekRevenueAgg, paymentBreakdown, productCount, lowStockCount,] = await Promise.all([
-        prisma.transaction.count({ where: todayWhere })
+        prisma_1.prisma.transaction.count({ where: todayWhere })
             .catch(() => 0),
         // Revenue from transaction items (not transaction total, for consistency)
-        (effectiveBranchId ? prisma.$queryRaw `
+        prisma_1.prisma.$queryRaw `
         SELECT COALESCE(SUM(ti.line_total), 0) AS revenue
         FROM "TransactionItem" ti
         JOIN "Transaction" t ON t.id = ti.transaction_id
         WHERE t.status = 'completed'
           AND t.created_at >= ${todayStart}
-          AND t.branch_id = ${effectiveBranchId}
-      ` : storeId ? prisma.$queryRaw `
-        SELECT COALESCE(SUM(ti.line_total), 0) AS revenue
-        FROM "TransactionItem" ti
-        JOIN "Transaction" t ON t.id = ti.transaction_id
-        WHERE t.status = 'completed'
-          AND t.created_at >= ${todayStart}
-          AND t.store_id = ${storeId}
-      ` : prisma.$queryRaw `
-        SELECT COALESCE(SUM(ti.line_total), 0) AS revenue
-        FROM "TransactionItem" ti
-        JOIN "Transaction" t ON t.id = ti.transaction_id
-        WHERE t.status = 'completed'
-          AND t.created_at >= ${todayStart}
-      `)
+          AND t.branch_id = ANY(${branchIds})
+      `
             .then(rows => ({ _sum: { total_amount: rows[0]?.revenue ?? 0 } }))
             .catch(() => ({ _sum: { total_amount: null } })),
-        prisma.transactionItem.aggregate({ where: { transaction: todayWhere }, _sum: { quantity: true } })
+        prisma_1.prisma.transactionItem.aggregate({ where: { transaction: todayWhere }, _sum: { quantity: true } })
             .catch(() => ({ _sum: { quantity: null } })),
         // Weekly revenue from transaction items
-        (effectiveBranchId ? prisma.$queryRaw `
+        prisma_1.prisma.$queryRaw `
         SELECT COALESCE(SUM(ti.line_total), 0) AS revenue
         FROM "TransactionItem" ti
         JOIN "Transaction" t ON t.id = ti.transaction_id
         WHERE t.status = 'completed'
           AND t.created_at >= ${weekStart}
-          AND t.branch_id = ${effectiveBranchId}
-      ` : storeId ? prisma.$queryRaw `
-        SELECT COALESCE(SUM(ti.line_total), 0) AS revenue
-        FROM "TransactionItem" ti
-        JOIN "Transaction" t ON t.id = ti.transaction_id
-        WHERE t.status = 'completed'
-          AND t.created_at >= ${weekStart}
-          AND t.store_id = ${storeId}
-      ` : prisma.$queryRaw `
-        SELECT COALESCE(SUM(ti.line_total), 0) AS revenue
-        FROM "TransactionItem" ti
-        JOIN "Transaction" t ON t.id = ti.transaction_id
-        WHERE t.status = 'completed'
-          AND t.created_at >= ${weekStart}
-      `)
+          AND t.branch_id = ANY(${branchIds})
+      `
             .then(rows => ({ _sum: { total_amount: rows[0]?.revenue ?? 0 } }))
             .catch(() => ({ _sum: { total_amount: null } })),
         // Payment breakdown by method (using line_total from items)
-        (effectiveBranchId ? prisma.$queryRaw `
+        prisma_1.prisma.$queryRaw `
         SELECT
           t.payment_method,
           COUNT(DISTINCT t.id) AS count,
@@ -102,76 +67,32 @@ router.get('/dashboard', (0, errorHandler_1.catchAsync)(async (req, res) => {
         LEFT JOIN "TransactionItem" ti ON ti.transaction_id = t.id
         WHERE t.status = 'completed'
           AND t.created_at >= ${todayStart}
-          AND t.branch_id = ${effectiveBranchId}
+          AND t.branch_id = ANY(${branchIds})
         GROUP BY t.payment_method
         ORDER BY revenue DESC
-      ` : storeId ? prisma.$queryRaw `
-        SELECT
-          t.payment_method,
-          COUNT(DISTINCT t.id) AS count,
-          COALESCE(SUM(ti.line_total), 0) AS revenue
-        FROM "Transaction" t
-        LEFT JOIN "TransactionItem" ti ON ti.transaction_id = t.id
-        WHERE t.status = 'completed'
-          AND t.created_at >= ${todayStart}
-          AND t.store_id = ${storeId}
-        GROUP BY t.payment_method
-        ORDER BY revenue DESC
-      ` : prisma.$queryRaw `
-        SELECT
-          t.payment_method,
-          COUNT(DISTINCT t.id) AS count,
-          COALESCE(SUM(ti.line_total), 0) AS revenue
-        FROM "Transaction" t
-        LEFT JOIN "TransactionItem" ti ON ti.transaction_id = t.id
-        WHERE t.status = 'completed'
-          AND t.created_at >= ${todayStart}
-        GROUP BY t.payment_method
-        ORDER BY revenue DESC
-      `)
+      `
             .then(rows => rows.map(r => ({ payment_method: r.payment_method, _count: { id: Number(r.count) }, _sum: { total_amount: r.revenue } })))
             .catch(() => []),
-        // Product count — scoped to this store/branch
-        prisma.product.count({
+        // Product count — scoped to authorized branches
+        prisma_1.prisma.product.count({
             where: {
                 is_active: true,
-                ...(effectiveBranchId
-                    ? { branch_id: effectiveBranchId }
-                    : storeId
-                        ? { branch: { store_id: storeId } }
-                        : {})
+                branch_id: { in: branchIds }
             }
         }).catch(() => 0),
-        // Low-stock count — scoped to this store/branch
-        (effectiveBranchId
-            ? prisma.$queryRaw `
-            SELECT CAST(COUNT(*) AS INT) AS count
-            FROM "Inventory" i
-            JOIN "Product" p ON i.product_id = p.id
-            WHERE i.quantity_on_hand <= i.low_stock_threshold
-              AND p.is_active = true
-              AND p.branch_id = ${effectiveBranchId}
-          `
-            : storeId
-                ? prisma.$queryRaw `
-              SELECT CAST(COUNT(*) AS INT) AS count
-              FROM "Inventory" i
-              JOIN "Product" p ON i.product_id = p.id
-              JOIN "Branch"  b ON p.branch_id  = b.id
-              WHERE i.quantity_on_hand <= i.low_stock_threshold
-                AND p.is_active = true
-                AND b.store_id  = ${storeId}
-            `
-                : prisma.$queryRaw `
-              SELECT CAST(COUNT(*) AS INT) AS count
-              FROM "Inventory" i
-              JOIN "Product" p ON i.product_id = p.id
-              WHERE i.quantity_on_hand <= i.low_stock_threshold
-                AND p.is_active = true
-            `).then(rows => rows[0]?.count ?? 0).catch(() => 0),
+        // Low-stock count — scoped to authorized branches
+        prisma_1.prisma.$queryRaw `
+        SELECT CAST(COUNT(*) AS INT) AS count
+        FROM "Inventory" i
+        JOIN "Product" p ON i.product_id = p.id
+        WHERE i.quantity_on_hand <= i.low_stock_threshold
+          AND p.is_active = true
+          AND p.branch_id = ANY(${branchIds})
+      `
+            .then(rows => rows[0]?.count ?? 0).catch(() => 0),
     ]);
     // ── Recent transactions
-    const recentTransactions = await prisma.transaction.findMany({
+    const recentTransactions = await prisma_1.prisma.transaction.findMany({
         where: locationFilter,
         include: {
             user: { select: { first_name: true } },
@@ -183,62 +104,23 @@ router.get('/dashboard', (0, errorHandler_1.catchAsync)(async (req, res) => {
     // ── Top products — raw SQL with branch/store filtering
     let topProducts = [];
     try {
-        if (effectiveBranchId) {
-            topProducts = await prisma.$queryRaw `
-          SELECT
-            p.id,
-            p.name,
-            p.sku,
-            CAST(SUM(ti.quantity) AS INT)               AS total_sold,
-            CAST(SUM(ti."line_total") AS FLOAT)         AS total_revenue
-          FROM "TransactionItem" ti
-          JOIN "Product"      p  ON ti."product_id"     = p.id
-          JOIN "Transaction"  t  ON ti."transaction_id" = t.id
-          WHERE t."created_at" >= ${todayStart}
-            AND t.status = 'completed'
-            AND t.branch_id = ${effectiveBranchId}
-          GROUP BY p.id, p.name, p.sku
-          ORDER BY total_revenue DESC
-          LIMIT 5
-        `;
-        }
-        else if (storeId) {
-            topProducts = await prisma.$queryRaw `
-          SELECT
-            p.id,
-            p.name,
-            p.sku,
-            CAST(SUM(ti.quantity) AS INT)               AS total_sold,
-            CAST(SUM(ti."line_total") AS FLOAT)         AS total_revenue
-          FROM "TransactionItem" ti
-          JOIN "Product"      p  ON ti."product_id"     = p.id
-          JOIN "Transaction"  t  ON ti."transaction_id" = t.id
-          WHERE t."created_at" >= ${todayStart}
-            AND t.status = 'completed'
-            AND t.store_id = ${storeId}
-          GROUP BY p.id, p.name, p.sku
-          ORDER BY total_revenue DESC
-          LIMIT 5
-        `;
-        }
-        else {
-            topProducts = await prisma.$queryRaw `
-          SELECT
-            p.id,
-            p.name,
-            p.sku,
-            CAST(SUM(ti.quantity) AS INT)               AS total_sold,
-            CAST(SUM(ti."line_total") AS FLOAT)         AS total_revenue
-          FROM "TransactionItem" ti
-          JOIN "Product"      p  ON ti."product_id"     = p.id
-          JOIN "Transaction"  t  ON ti."transaction_id" = t.id
-          WHERE t."created_at" >= ${todayStart}
-            AND t.status = 'completed'
-          GROUP BY p.id, p.name, p.sku
-          ORDER BY total_revenue DESC
-          LIMIT 5
-        `;
-        }
+        topProducts = await prisma_1.prisma.$queryRaw `
+        SELECT
+          p.id,
+          p.name,
+          p.sku,
+          CAST(SUM(ti.quantity) AS INT)               AS total_sold,
+          CAST(SUM(ti."line_total") AS FLOAT)         AS total_revenue
+        FROM "TransactionItem" ti
+        JOIN "Product"      p  ON ti."product_id"     = p.id
+        JOIN "Transaction"  t  ON ti."transaction_id" = t.id
+        WHERE t."created_at" >= ${todayStart}
+          AND t.status = 'completed'
+          AND t.branch_id = ANY(${branchIds})
+        GROUP BY p.id, p.name, p.sku
+        ORDER BY total_revenue DESC
+        LIMIT 5
+      `;
     }
     catch (err) {
         console.error('[dashboard] top_products query failed:', err?.message ?? err);
@@ -246,39 +128,15 @@ router.get('/dashboard', (0, errorHandler_1.catchAsync)(async (req, res) => {
     // ── Profit calculation via raw SQL
     let totalCost = 0;
     try {
-        let costRows;
-        if (effectiveBranchId) {
-            costRows = await prisma.$queryRaw `
-          SELECT COALESCE(SUM(ti.quantity * COALESCE(p.cost_price, 0)), 0) AS total_cost
-          FROM "TransactionItem" ti
-          JOIN "Product" p ON p.id = ti.product_id
-          JOIN "Transaction" t ON t.id = ti.transaction_id
-          WHERE t.status = 'completed'
-            AND t.created_at >= ${todayStart}
-            AND t.branch_id = ${effectiveBranchId}
-        `;
-        }
-        else if (storeId) {
-            costRows = await prisma.$queryRaw `
-          SELECT COALESCE(SUM(ti.quantity * COALESCE(p.cost_price, 0)), 0) AS total_cost
-          FROM "TransactionItem" ti
-          JOIN "Product" p ON p.id = ti.product_id
-          JOIN "Transaction" t ON t.id = ti.transaction_id
-          WHERE t.status = 'completed'
-            AND t.created_at >= ${todayStart}
-            AND t.store_id = ${storeId}
-        `;
-        }
-        else {
-            costRows = await prisma.$queryRaw `
-          SELECT COALESCE(SUM(ti.quantity * COALESCE(p.cost_price, 0)), 0) AS total_cost
-          FROM "TransactionItem" ti
-          JOIN "Product" p ON p.id = ti.product_id
-          JOIN "Transaction" t ON t.id = ti.transaction_id
-          WHERE t.status = 'completed'
-            AND t.created_at >= ${todayStart}
-        `;
-        }
+        const costRows = await prisma_1.prisma.$queryRaw `
+        SELECT COALESCE(SUM(ti.quantity * COALESCE(p.cost_price, 0)), 0) AS total_cost
+        FROM "TransactionItem" ti
+        JOIN "Product" p ON p.id = ti.product_id
+        JOIN "Transaction" t ON t.id = ti.transaction_id
+        WHERE t.status = 'completed'
+          AND t.created_at >= ${todayStart}
+          AND t.branch_id = ANY(${branchIds})
+      `;
         totalCost = Number(costRows[0]?.total_cost ?? 0);
     }
     catch (err) {
@@ -339,11 +197,10 @@ router.get('/users', (0, errorHandler_1.catchAsync)(async (req, res) => {
     if (!['admin', 'manager'].includes(role)) {
         throw new errorHandler_1.AppError(403, 'Admin or manager access required');
     }
-    const locationFilter = branchWhere(branchId, storeId);
-    const users = await prisma.user.findMany({
+    const users = await prisma_1.prisma.user.findMany({
         where: {
             is_active: true,
-            ...locationFilter
+            store_id: storeId || undefined
         },
         select: {
             id: true,
@@ -370,74 +227,28 @@ router.get('/sales', (0, errorHandler_1.catchAsync)(async (req, res) => {
         throw new errorHandler_1.AppError(400, 'dateFrom and dateTo are required');
     const user = req.user;
     const storeId = user?.storeId ?? null;
-    let branchId = user?.branchId ?? null;
-    // Admin can filter by a specific branch via query param
-    if (!branchId && user?.role === 'admin' && req.query.branch_id) {
-        branchId = req.query.branch_id;
-    }
+    const branchIds = await (0, branchHelper_1.getAuthorizedBranchIds)(req);
     const from = new Date(dateFrom);
     const to = new Date(dateTo);
     // Use raw SQL so we can compute profit in a single join
-    let rows;
-    if (branchId) {
-        rows = await prisma.$queryRaw `
-        SELECT
-          DATE(t.created_at)                                                     AS date,
-          CAST(COUNT(DISTINCT t.id)       AS INT)                               AS transactions,
-          CAST(SUM(ti.line_total)         AS FLOAT)                             AS revenue,
-          CAST(SUM(ti.quantity)           AS INT)                               AS items_sold,
-          CAST(SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT)          AS total_cost,
-          CAST(SUM(ti.line_total) - SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT) AS profit
-        FROM "Transaction" t
-        LEFT JOIN "TransactionItem" ti ON ti.transaction_id = t.id
-        LEFT JOIN "Product" p ON p.id = ti.product_id
-        WHERE t.status = 'completed'
-          AND t.created_at >= ${from}
-          AND t.created_at <= ${to}
-          AND t.branch_id = ${branchId}
-        GROUP BY DATE(t.created_at)
-        ORDER BY date ASC
-      `;
-    }
-    else if (storeId) {
-        rows = await prisma.$queryRaw `
-        SELECT
-          DATE(t.created_at)                                                     AS date,
-          CAST(COUNT(DISTINCT t.id)       AS INT)                               AS transactions,
-          CAST(SUM(ti.line_total)         AS FLOAT)                             AS revenue,
-          CAST(SUM(ti.quantity)           AS INT)                               AS items_sold,
-          CAST(SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT)          AS total_cost,
-          CAST(SUM(ti.line_total) - SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT) AS profit
-        FROM "Transaction" t
-        LEFT JOIN "TransactionItem" ti ON ti.transaction_id = t.id
-        LEFT JOIN "Product" p ON p.id = ti.product_id
-        WHERE t.status = 'completed'
-          AND t.created_at >= ${from}
-          AND t.created_at <= ${to}
-          AND t.store_id = ${storeId}
-        GROUP BY DATE(t.created_at)
-        ORDER BY date ASC
-      `;
-    }
-    else {
-        rows = await prisma.$queryRaw `
-        SELECT
-          DATE(t.created_at)                                                     AS date,
-          CAST(COUNT(DISTINCT t.id)       AS INT)                               AS transactions,
-          CAST(SUM(ti.line_total)         AS FLOAT)                             AS revenue,
-          CAST(SUM(ti.quantity)           AS INT)                               AS items_sold,
-          CAST(SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT)          AS total_cost,
-          CAST(SUM(ti.line_total) - SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT) AS profit
-        FROM "Transaction" t
-        LEFT JOIN "TransactionItem" ti ON ti.transaction_id = t.id
-        LEFT JOIN "Product" p ON p.id = ti.product_id
-        WHERE t.status = 'completed'
-          AND t.created_at >= ${from}
-          AND t.created_at <= ${to}
-        GROUP BY DATE(t.created_at)
-        ORDER BY date ASC
-      `;
-    }
+    const rows = await prisma_1.prisma.$queryRaw `
+      SELECT
+        DATE(t.created_at)                                                     AS date,
+        CAST(COUNT(DISTINCT t.id)       AS INT)                               AS transactions,
+        CAST(SUM(ti.line_total)         AS FLOAT)                             AS revenue,
+        CAST(SUM(ti.quantity)           AS INT)                               AS items_sold,
+        CAST(SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT)          AS total_cost,
+        CAST(SUM(ti.line_total) - SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT) AS profit
+      FROM "Transaction" t
+      LEFT JOIN "TransactionItem" ti ON ti.transaction_id = t.id
+      LEFT JOIN "Product" p ON p.id = ti.product_id
+      WHERE t.status = 'completed'
+        AND t.created_at >= ${from}
+        AND t.created_at <= ${to}
+        AND t.branch_id = ANY(${branchIds})
+      GROUP BY DATE(t.created_at)
+      ORDER BY date ASC
+    `;
     res.json({
         status: 'success',
         data: rows.map(row => ({
@@ -455,11 +266,7 @@ router.get('/top-products', (0, errorHandler_1.catchAsync)(async (req, res) => {
     const { period = 'daily', limit = '10' } = req.query;
     const user = req.user;
     const storeId = user?.storeId ?? null;
-    let branchId = user?.branchId ?? null;
-    // Admin can filter by a specific branch via query param
-    if (!branchId && user?.role === 'admin' && req.query.branch_id) {
-        branchId = req.query.branch_id;
-    }
+    const branchIds = await (0, branchHelper_1.getAuthorizedBranchIds)(req);
     const dateFrom = new Date();
     switch (period) {
         case 'weekly':
@@ -477,75 +284,27 @@ router.get('/top-products', (0, errorHandler_1.catchAsync)(async (req, res) => {
     const dateTo = new Date();
     dateTo.setHours(23, 59, 59, 999);
     const lim = Math.min(50, Math.max(1, parseInt(limit) || 10));
-    let rows;
-    if (branchId) {
-        rows = await prisma.$queryRaw `
-        SELECT
-          p.id,
-          p.name,
-          p.sku,
-          CAST(SUM(ti.quantity)    AS INT)   AS total_sold,
-          CAST(SUM(ti.line_total)  AS FLOAT) AS total_revenue,
-          CAST(COUNT(DISTINCT ti.transaction_id) AS INT) AS transaction_count,
-          CAST(SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT) AS total_cost,
-          CAST(SUM(ti.line_total) - SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT) AS profit
-        FROM "TransactionItem" ti
-        JOIN "Product"     p ON ti.product_id     = p.id
-        JOIN "Transaction" t ON ti.transaction_id = t.id
-        WHERE t.created_at >= ${dateFrom}
-          AND t.created_at <= ${dateTo}
-          AND t.status     = 'completed'
-          AND t.branch_id  = ${branchId}
-        GROUP BY p.id, p.name, p.sku
-        ORDER BY total_revenue DESC
-        LIMIT ${lim}
-      `;
-    }
-    else if (storeId) {
-        rows = await prisma.$queryRaw `
-        SELECT
-          p.id,
-          p.name,
-          p.sku,
-          CAST(SUM(ti.quantity)    AS INT)   AS total_sold,
-          CAST(SUM(ti.line_total)  AS FLOAT) AS total_revenue,
-          CAST(COUNT(DISTINCT ti.transaction_id) AS INT) AS transaction_count,
-          CAST(SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT) AS total_cost,
-          CAST(SUM(ti.line_total) - SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT) AS profit
-        FROM "TransactionItem" ti
-        JOIN "Product"     p ON ti.product_id     = p.id
-        JOIN "Transaction" t ON ti.transaction_id = t.id
-        WHERE t.created_at >= ${dateFrom}
-          AND t.created_at <= ${dateTo}
-          AND t.status     = 'completed'
-          AND t.store_id   = ${storeId}
-        GROUP BY p.id, p.name, p.sku
-        ORDER BY total_revenue DESC
-        LIMIT ${lim}
-      `;
-    }
-    else {
-        rows = await prisma.$queryRaw `
-        SELECT
-          p.id,
-          p.name,
-          p.sku,
-          CAST(SUM(ti.quantity)    AS INT)   AS total_sold,
-          CAST(SUM(ti.line_total)  AS FLOAT) AS total_revenue,
-          CAST(COUNT(DISTINCT ti.transaction_id) AS INT) AS transaction_count,
-          CAST(SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT) AS total_cost,
-          CAST(SUM(ti.line_total) - SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT) AS profit
-        FROM "TransactionItem" ti
-        JOIN "Product"     p ON ti.product_id     = p.id
-        JOIN "Transaction" t ON ti.transaction_id = t.id
-        WHERE t.created_at >= ${dateFrom}
-          AND t.created_at <= ${dateTo}
-          AND t.status = 'completed'
-        GROUP BY p.id, p.name, p.sku
-        ORDER BY total_revenue DESC
-        LIMIT ${lim}
-      `;
-    }
+    const rows = await prisma_1.prisma.$queryRaw `
+      SELECT
+        p.id,
+        p.name,
+        p.sku,
+        CAST(SUM(ti.quantity)    AS INT)   AS total_sold,
+        CAST(SUM(ti.line_total)  AS FLOAT) AS total_revenue,
+        CAST(COUNT(DISTINCT ti.transaction_id) AS INT) AS transaction_count,
+        CAST(SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT) AS total_cost,
+        CAST(SUM(ti.line_total) - SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT) AS profit
+      FROM "TransactionItem" ti
+      JOIN "Product"     p ON ti.product_id     = p.id
+      JOIN "Transaction" t ON ti.transaction_id = t.id
+      WHERE t.created_at >= ${dateFrom}
+        AND t.created_at <= ${dateTo}
+        AND t.status     = 'completed'
+        AND t.branch_id  = ANY(${branchIds})
+      GROUP BY p.id, p.name, p.sku
+      ORDER BY total_revenue DESC
+      LIMIT ${lim}
+    `;
     res.json({
         status: 'success',
         data: rows.map(p => ({
@@ -566,90 +325,34 @@ router.get('/employee-performance', (0, errorHandler_1.catchAsync)(async (req, r
     const { dateFrom, dateTo } = req.query;
     const user = req.user;
     const storeId = user?.storeId ?? null;
-    let branchId = user?.branchId ?? null;
-    // Admin can filter by a specific branch via query param
-    if (!branchId && user?.role === 'admin' && req.query.branch_id) {
-        branchId = req.query.branch_id;
-    }
+    const branchIds = await (0, branchHelper_1.getAuthorizedBranchIds)(req);
     const from = dateFrom
         ? new Date(dateFrom)
         : (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d; })();
     const to = dateTo ? new Date(dateTo) : new Date();
-    let rows;
-    if (branchId) {
-        rows = await prisma.$queryRaw `
-        SELECT
-          u.id,
-          u.first_name,
-          u.last_name,
-          u.role,
-          CAST(COUNT(DISTINCT t.id) AS INT)    AS transaction_count,
-          CAST(COALESCE(SUM(ti.line_total), 0)  AS FLOAT)  AS total_revenue,
-          CASE WHEN COUNT(DISTINCT t.id) > 0
-            THEN CAST(COALESCE(SUM(ti.line_total), 0) / COUNT(DISTINCT t.id) AS FLOAT)
-            ELSE 0
-          END AS avg_transaction
-        FROM "User" u
-        JOIN "Transaction" t ON t.user_id = u.id
-        LEFT JOIN "TransactionItem" ti ON ti.transaction_id = t.id
-        WHERE t.status     = 'completed'
-          AND t.created_at >= ${from}
-          AND t.created_at <= ${to}
-          AND t.branch_id  = ${branchId}
-          AND u.is_active  = true
-        GROUP BY u.id, u.first_name, u.last_name, u.role
-        ORDER BY total_revenue DESC
-      `;
-    }
-    else if (storeId) {
-        rows = await prisma.$queryRaw `
-        SELECT
-          u.id,
-          u.first_name,
-          u.last_name,
-          u.role,
-          CAST(COUNT(DISTINCT t.id) AS INT)    AS transaction_count,
-          CAST(COALESCE(SUM(ti.line_total), 0)  AS FLOAT)  AS total_revenue,
-          CASE WHEN COUNT(DISTINCT t.id) > 0
-            THEN CAST(COALESCE(SUM(ti.line_total), 0) / COUNT(DISTINCT t.id) AS FLOAT)
-            ELSE 0
-          END AS avg_transaction
-        FROM "User" u
-        JOIN "Transaction" t ON t.user_id = u.id
-        LEFT JOIN "TransactionItem" ti ON ti.transaction_id = t.id
-        WHERE t.status     = 'completed'
-          AND t.created_at >= ${from}
-          AND t.created_at <= ${to}
-          AND t.store_id   = ${storeId}
-          AND u.is_active  = true
-        GROUP BY u.id, u.first_name, u.last_name, u.role
-        ORDER BY total_revenue DESC
-      `;
-    }
-    else {
-        rows = await prisma.$queryRaw `
-        SELECT
-          u.id,
-          u.first_name,
-          u.last_name,
-          u.role,
-          CAST(COUNT(DISTINCT t.id) AS INT)    AS transaction_count,
-          CAST(COALESCE(SUM(ti.line_total), 0)  AS FLOAT)  AS total_revenue,
-          CASE WHEN COUNT(DISTINCT t.id) > 0
-            THEN CAST(COALESCE(SUM(ti.line_total), 0) / COUNT(DISTINCT t.id) AS FLOAT)
-            ELSE 0
-          END AS avg_transaction
-        FROM "User" u
-        JOIN "Transaction" t ON t.user_id = u.id
-        LEFT JOIN "TransactionItem" ti ON ti.transaction_id = t.id
-        WHERE t.status     = 'completed'
-          AND t.created_at >= ${from}
-          AND t.created_at <= ${to}
-          AND u.is_active  = true
-        GROUP BY u.id, u.first_name, u.last_name, u.role
-        ORDER BY total_revenue DESC
-      `;
-    }
+    const rows = await prisma_1.prisma.$queryRaw `
+      SELECT
+        u.id,
+        u.first_name,
+        u.last_name,
+        u.role,
+        CAST(COUNT(DISTINCT t.id) AS INT)    AS transaction_count,
+        CAST(COALESCE(SUM(ti.line_total), 0)  AS FLOAT)  AS total_revenue,
+        CASE WHEN COUNT(DISTINCT t.id) > 0
+          THEN CAST(COALESCE(SUM(ti.line_total), 0) / COUNT(DISTINCT t.id) AS FLOAT)
+          ELSE 0
+        END AS avg_transaction
+      FROM "User" u
+      JOIN "Transaction" t ON t.user_id = u.id
+      LEFT JOIN "TransactionItem" ti ON ti.transaction_id = t.id
+      WHERE t.status     = 'completed'
+        AND t.created_at >= ${from}
+        AND t.created_at <= ${to}
+        AND t.branch_id  = ANY(${branchIds})
+        AND u.is_active  = true
+      GROUP BY u.id, u.first_name, u.last_name, u.role
+      ORDER BY total_revenue DESC
+    `;
     res.json({
         status: 'success',
         data: rows.map(r => ({
@@ -670,67 +373,29 @@ router.get('/payments/methods', (0, errorHandler_1.catchAsync)(async (req, res) 
         throw new errorHandler_1.AppError(400, 'dateFrom and dateTo are required');
     const user = req.user;
     const storeId = user?.storeId ?? null;
-    let branchId = user?.branchId ?? null;
-    // Admin can filter by a specific branch via query param
-    if (!branchId && user?.role === 'admin' && req.query.branch_id) {
-        branchId = req.query.branch_id;
-    }
+    const branchIds = await (0, branchHelper_1.getAuthorizedBranchIds)(req);
     const from = new Date(dateFrom);
     const to = new Date(dateTo);
-    let results;
-    if (branchId) {
-        results = await prisma.$queryRaw `
-        SELECT
-          t.payment_method,
-          CAST(COUNT(DISTINCT t.id) AS INT) AS count,
-          CAST(COALESCE(SUM(ti.line_total), 0) AS FLOAT) AS total_amount
-        FROM "Transaction" t
-        LEFT JOIN "TransactionItem" ti ON ti.transaction_id = t.id
-        WHERE t.status = 'completed'
-          AND t.created_at >= ${from}
-          AND t.created_at <= ${to}
-          AND t.branch_id = ${branchId}
-        GROUP BY t.payment_method
-        ORDER BY total_amount DESC
-      `;
-    }
-    else if (storeId) {
-        results = await prisma.$queryRaw `
-        SELECT
-          t.payment_method,
-          CAST(COUNT(DISTINCT t.id) AS INT) AS count,
-          CAST(COALESCE(SUM(ti.line_total), 0) AS FLOAT) AS total_amount
-        FROM "Transaction" t
-        LEFT JOIN "TransactionItem" ti ON ti.transaction_id = t.id
-        WHERE t.status = 'completed'
-          AND t.created_at >= ${from}
-          AND t.created_at <= ${to}
-          AND t.store_id = ${storeId}
-        GROUP BY t.payment_method
-        ORDER BY total_amount DESC
-      `;
-    }
-    else {
-        results = await prisma.$queryRaw `
-        SELECT
-          t.payment_method,
-          CAST(COUNT(DISTINCT t.id) AS INT) AS count,
-          CAST(COALESCE(SUM(ti.line_total), 0) AS FLOAT) AS total_amount
-        FROM "Transaction" t
-        LEFT JOIN "TransactionItem" ti ON ti.transaction_id = t.id
-        WHERE t.status = 'completed'
-          AND t.created_at >= ${from}
-          AND t.created_at <= ${to}
-        GROUP BY t.payment_method
-        ORDER BY total_amount DESC
-      `;
-    }
+    const results = await prisma_1.prisma.$queryRaw `
+      SELECT
+        t.payment_method,
+        CAST(COUNT(DISTINCT t.id) AS INT) AS count,
+        CAST(COALESCE(SUM(ti.line_total), 0) AS FLOAT) AS total_amount
+      FROM "Transaction" t
+      LEFT JOIN "TransactionItem" ti ON ti.transaction_id = t.id
+      WHERE t.status = 'completed'
+        AND t.created_at >= ${from}
+        AND t.created_at <= ${to}
+        AND t.branch_id = ANY(${branchIds})
+      GROUP BY t.payment_method
+      ORDER BY total_amount DESC
+    `;
     res.json({
         status: 'success',
         data: results.map(r => ({
             payment_method: r.payment_method,
-            count: Number(r.count ?? 0),
-            total_amount: Number(r.total_amount ?? 0)
+            _count: { id: Number(r.count ?? 0) },
+            _sum: { total_amount: Number(r.total_amount ?? 0) }
         }))
     });
 }));
@@ -745,11 +410,11 @@ router.get('/outstanding', (0, errorHandler_1.catchAsync)(async (req, res) => {
         customerWhere.store_id = storeId;
     }
     const [customers, payments] = await Promise.all([
-        prisma.customer.findMany({
+        prisma_1.prisma.customer.findMany({
             where: customerWhere,
             select: { id: true, total_spent: true }
         }),
-        prisma.payment.groupBy({
+        prisma_1.prisma.payment.groupBy({
             by: ['customer_id'],
             _sum: { amount: true }
         })
@@ -770,6 +435,43 @@ router.get('/outstanding', (0, errorHandler_1.catchAsync)(async (req, res) => {
             total_outstanding: totalOutstanding,
             customers_with_balance: customersWithBalance
         }
+    });
+}));
+// ─── Discount analytics ───────────────────────────────────────
+router.get('/discounts', (0, errorHandler_1.catchAsync)(async (req, res) => {
+    const { dateFrom, dateTo } = req.query;
+    const user = req.user;
+    const storeId = user?.storeId ?? null;
+    const branchIds = await (0, branchHelper_1.getAuthorizedBranchIds)(req);
+    const from = dateFrom ? new Date(dateFrom) : new Date(0);
+    const to = dateTo ? new Date(dateTo) : new Date();
+    const rows = await prisma_1.prisma.$queryRaw `
+      SELECT
+        u.id,
+        u.first_name,
+        u.last_name,
+        CAST(COUNT(t.id) AS INT) AS discount_count,
+        CAST(SUM(t.discount_amount) AS FLOAT) AS total_discount,
+        CAST(SUM(t.total_amount) AS FLOAT) AS total_revenue
+      FROM "Transaction" t
+      JOIN "User" u ON t.user_id = u.id
+      WHERE t.status = 'completed'
+        AND t.discount_amount > 0
+        AND t.created_at >= ${from}
+        AND t.created_at <= ${to}
+        AND t.branch_id = ANY(${branchIds})
+      GROUP BY u.id, u.first_name, u.last_name
+      ORDER BY total_discount DESC
+    `;
+    res.json({
+        status: 'success',
+        data: rows.map(r => ({
+            user_id: r.id,
+            cashier_name: `${r.first_name} ${r.last_name}`.trim(),
+            discount_count: Number(r.discount_count ?? 0),
+            total_discount: Number(r.total_discount ?? 0),
+            associated_revenue: Number(r.total_revenue ?? 0)
+        }))
     });
 }));
 exports.default = router;

@@ -4,13 +4,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
-const client_1 = require("@prisma/client");
+const prisma_1 = require("../../lib/prisma");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const uuid_1 = require("uuid");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const errorHandler_1 = require("../../utils/errorHandler");
 const router = (0, express_1.Router)();
-const prisma = new client_1.PrismaClient();
 router.use(auth_middleware_1.authMiddleware);
 // Every route in this file is platform-level — only super admins.
 router.use((req, _res, next) => {
@@ -23,11 +22,11 @@ router.use((req, _res, next) => {
 // List all stores, enriched with branch + user counts so the wizard list
 // shows useful context at a glance.
 router.get('/', (0, errorHandler_1.catchAsync)(async (_req, res) => {
-    const stores = await prisma.store.findMany({ orderBy: { created_at: 'asc' } });
+    const stores = await prisma_1.prisma.store.findMany({ orderBy: { created_at: 'asc' } });
     const enriched = await Promise.all(stores.map(async (s) => {
         const [branch_count, user_count] = await Promise.all([
-            prisma.branch.count({ where: { store_id: s.id } }),
-            prisma.user.count({ where: { store_id: s.id } })
+            prisma_1.prisma.branch.count({ where: { store_id: s.id } }),
+            prisma_1.prisma.user.count({ where: { store_id: s.id } })
         ]);
         return { ...s, branch_count, user_count };
     }));
@@ -45,7 +44,7 @@ router.post('/', (0, errorHandler_1.catchAsync)(async (req, res) => {
     // Auto-generate the next store id by scanning existing ones for the
     // `store_NNN` pattern. Non-matching ids are ignored so custom ids
     // (e.g. created by hand earlier) don't break sequence.
-    const existing = await prisma.store.findMany({ select: { id: true } });
+    const existing = await prisma_1.prisma.store.findMany({ select: { id: true } });
     let nextNum = 1;
     for (const s of existing) {
         const m = s.id.match(/^store_(\d+)$/);
@@ -58,14 +57,14 @@ router.post('/', (0, errorHandler_1.catchAsync)(async (req, res) => {
     const storeId = `store_${String(nextNum).padStart(3, '0')}`;
     const uname = String(admin_username).toLowerCase().trim();
     const mail = String(admin_email).toLowerCase().trim();
-    const conflict = await prisma.user.findFirst({
+    const conflict = await prisma_1.prisma.user.findFirst({
         where: { OR: [{ username: uname }, { email: mail }] }
     });
     if (conflict) {
         throw new errorHandler_1.AppError(400, 'A user with that username or email already exists');
     }
     const password_hash = await bcryptjs_1.default.hash(admin_password, 10);
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await prisma_1.prisma.$transaction(async (tx) => {
         const store = await tx.store.create({
             data: {
                 id: storeId,
@@ -116,7 +115,7 @@ router.patch('/:id', (0, errorHandler_1.catchAsync)(async (req, res) => {
         data.currency = String(currency).toUpperCase();
     if (is_active !== undefined)
         data.is_active = !!is_active;
-    const store = await prisma.store.update({
+    const store = await prisma_1.prisma.store.update({
         where: { id: req.params.id },
         data
     });

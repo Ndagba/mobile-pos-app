@@ -17,6 +17,7 @@ import ApiClient from './services/ApiClient';
 import { SyncManager } from './services/SyncManager';
 import NotificationService from './services/NotificationService';
 import { setConnected, setLastSyncAt, setSyncMode, clearSyncQueue } from './redux/slices/syncSlice';
+import { setStoreSettings } from './redux/slices/settingsSlice';
 import FloatingTabBar from './components/ui/FloatingTabBar';
 import { useResponsive, responsiveSpacing, responsiveFontSize } from './utils/responsiveDesign';
 import { C } from './theme';
@@ -28,7 +29,9 @@ const SIDEBAR_META: Record<string, { icon: SidebarIcon; label: string }> = {
   Dashboard: { icon: 'view-dashboard',   label: 'Home'      },
   Inventory: { icon: 'package-variant',  label: 'Inventory' },
   Customers: { icon: 'account-multiple', label: 'Customers' },
+  Suppliers: { icon: 'truck-outline',    label: 'Suppliers' },
   Analytics: { icon: 'chart-bar',        label: 'Analytics' },
+  Admin:     { icon: 'shield-account',   label: 'Admin'     },
   Settings:  { icon: 'cog',              label: 'Settings'  },
 };
 
@@ -55,6 +58,21 @@ async function runPendingSync() {
   }
 }
 
+async function prefetchSettings() {
+  try {
+    const res: any = await ApiClient.get('/settings');
+    const data = res?.data ?? res;
+    store.dispatch(setStoreSettings({
+      allow_cashier_add_customers: data?.allow_cashier_add_customers ?? true,
+      allow_cashier_edit_customers: data?.allow_cashier_edit_customers ?? true,
+      customer_menu_enabled: data?.customer_menu_enabled ?? true,
+      supplier_menu_enabled: data?.supplier_menu_enabled ?? true,
+    }));
+  } catch (e) {
+    console.warn('Failed to prefetch store settings:', e);
+  }
+}
+
 // Cache customers locally so the Customers screen works with no connection.
 async function prefetchCustomers() {
   try {
@@ -76,27 +94,46 @@ import SettingsScreen      from './screens/SettingsScreen';
 import TransactionsScreen  from './screens/TransactionsScreen';
 import CustomersScreen     from './screens/CustomersScreen';
 import CustomerLedgerScreen from './screens/CustomerLedgerScreen';
+import SuppliersScreen from './screens/SuppliersScreen';
+import SupplierLedgerScreen from './screens/SupplierLedgerScreen';
 import AdminSubscriptionsScreen from './screens/AdminSubscriptionsScreen';
+import AdminScreen from './screens/AdminScreen';
+import StockCountsScreen from './screens/StockCountsScreen';
+import CashShiftsScreen from './screens/CashShiftsScreen';
+import EODReportsScreen from './screens/EODReportsScreen';
+import AuditLogsScreen from './screens/AuditLogsScreen';
 
 const Tab   = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
 // ─── Role-based tab access ────────────────────────────────────
 const ROLE_TABS: Record<string, string[]> = {
-  admin:   ['Dashboard', 'Inventory', 'Customers', 'Analytics', 'Settings'],
-  manager: ['Dashboard', 'Inventory', 'Customers', 'Analytics', 'Settings'],
-  cashier: ['Dashboard', 'Customers', 'Settings'],
+  admin:   ['Dashboard', 'Inventory', 'Customers', 'Suppliers', 'Analytics', 'Admin', 'Settings'],
+  manager: ['Dashboard', 'Inventory', 'Customers', 'Suppliers', 'Analytics', 'Admin', 'Settings'],
+  cashier: ['Dashboard', 'Customers', 'Suppliers', 'Settings'],
 };
 
 // ─── Main tabs (no Checkout — it lives in the Stack as a modal) ──
 function MainTabs() {
   const auth = useSelector((state: RootState) => state.auth);
+  const settings = useSelector((state: RootState) => state.settings.settings);
   const role = auth.user?.role ?? 'cashier';
   const allowedTabs = ROLE_TABS[role] ?? ROLE_TABS['cashier'];
-  const can = (tab: string) => allowedTabs.includes(tab);
+  const can = (tab: string) => {
+    if (tab === 'Customers') {
+      const isEnabled = settings?.customer_menu_enabled ?? true;
+      if (role === 'cashier' && !isEnabled) return false;
+    }
+    if (tab === 'Suppliers') {
+      const isEnabled = settings?.supplier_menu_enabled ?? true;
+      if (role === 'cashier' && !isEnabled) return false;
+    }
+    return allowedTabs.includes(tab);
+  };
 
   return (
     <Tab.Navigator
+      id="tabs"
       tabBar={(props) => <FloatingTabBar {...props} />}
       screenOptions={{
         headerShown: false,
@@ -111,8 +148,14 @@ function MainTabs() {
       {can('Customers') && (
         <Tab.Screen name="Customers" component={CustomersScreen} />
       )}
+      {can('Suppliers') && (
+        <Tab.Screen name="Suppliers" component={SuppliersScreen} />
+      )}
       {can('Analytics') && (
         <Tab.Screen name="Analytics" component={AnalyticsScreen} />
+      )}
+      {can('Admin') && (
+        <Tab.Screen name="Admin" component={AdminScreen} />
       )}
       <Tab.Screen name="Settings" component={SettingsScreen} />
     </Tab.Navigator>
@@ -126,7 +169,7 @@ function MainTabs() {
 // is actually rendered.
 function TabletNavigationRoot() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator id="tablet" screenOptions={{ headerShown: false }}>
       {/* Tablet sidebar navigation with screens */}
       <Stack.Screen
         name="TabletMain"
@@ -138,6 +181,11 @@ function TabletNavigationRoot() {
         <Stack.Screen name="Checkout" component={CheckoutScreen} />
         <Stack.Screen name="Transactions" component={TransactionsScreen} />
         <Stack.Screen name="CustomerLedger" component={CustomerLedgerScreen} />
+        <Stack.Screen name="SupplierLedger" component={SupplierLedgerScreen} />
+        <Stack.Screen name="StockCounts" component={StockCountsScreen} />
+        <Stack.Screen name="CashShifts" component={CashShiftsScreen} />
+        <Stack.Screen name="EODReports" component={EODReportsScreen} />
+        <Stack.Screen name="AuditLogs" component={AuditLogsScreen} />
         {/* Super-admin only: gating is enforced at the screen entry point */}
         <Stack.Screen name="AdminSubscriptions" component={AdminSubscriptionsScreen} />
       </Stack.Group>
@@ -153,8 +201,19 @@ function TabletMainContent({ navigation }: any) {
   const spacing = responsiveSpacing(deviceType);
   const fontSize = responsiveFontSize(deviceType);
   const role = auth.user?.role ?? 'cashier';
+  const settings = useSelector((state: RootState) => state.settings.settings);
   const allowedTabs = ROLE_TABS[role] ?? ROLE_TABS['cashier'];
-  const can = (tab: string) => allowedTabs.includes(tab);
+  const can = (tab: string) => {
+    if (tab === 'Customers') {
+      const isEnabled = settings?.customer_menu_enabled ?? true;
+      if (role === 'cashier' && !isEnabled) return false;
+    }
+    if (tab === 'Suppliers') {
+      const isEnabled = settings?.supplier_menu_enabled ?? true;
+      if (role === 'cashier' && !isEnabled) return false;
+    }
+    return allowedTabs.includes(tab);
+  };
   const [selectedTab, setSelectedTab] = useState('Dashboard');
 
   // Tab config with components — Dashboard and Settings are always available;
@@ -163,7 +222,9 @@ function TabletMainContent({ navigation }: any) {
     { name: 'Dashboard', component: DashboardScreen },
     ...(can('Inventory') ? [{ name: 'Inventory', component: InventoryScreen }] : []),
     ...(can('Customers') ? [{ name: 'Customers', component: CustomersScreen }] : []),
+    ...(can('Suppliers') ? [{ name: 'Suppliers', component: SuppliersScreen }] : []),
     ...(can('Analytics') ? [{ name: 'Analytics', component: AnalyticsScreen }] : []),
+    ...(can('Admin') ? [{ name: 'Admin', component: AdminScreen }] : []),
     { name: 'Settings', component: SettingsScreen },
   ];
 
@@ -324,7 +385,7 @@ function AuthenticatedRoot() {
   }
 
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator id="main" screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Main" component={MainTabs} />
       <Stack.Screen
         name="Checkout"
@@ -341,6 +402,15 @@ function AuthenticatedRoot() {
         component={CustomerLedgerScreen}
         options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
       />
+      <Stack.Screen
+        name="SupplierLedger"
+        component={SupplierLedgerScreen}
+        options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+      />
+      <Stack.Screen name="StockCounts" component={StockCountsScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="CashShifts" component={CashShiftsScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="EODReports" component={EODReportsScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="AuditLogs" component={AuditLogsScreen} options={{ presentation: 'modal' }} />
       {/* Super-admin only: gating is enforced at the screen entry point */}
       <Stack.Screen
         name="AdminSubscriptions"
@@ -360,9 +430,10 @@ function AppNavigator() {
     bootstrapAsync();
   }, []);
 
-  // After login — cache customers so the Customers screen works offline.
+  // After login — cache settings and customers so the app works offline.
   useEffect(() => {
     if (auth.isAuthenticated) {
+      prefetchSettings();
       prefetchCustomers();
     }
   }, [auth.isAuthenticated]);
@@ -379,6 +450,7 @@ function AppNavigator() {
         store.dispatch(setConnected(online));
         if (online) {
           runPendingSync();
+          prefetchSettings();
           prefetchCustomers();
         }
       });

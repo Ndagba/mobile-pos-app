@@ -3,11 +3,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const TransactionService_1 = require("../../services/TransactionService");
 const auth_middleware_1 = require("../middleware/auth.middleware");
+const featureGate_middleware_1 = require("../middleware/featureGate.middleware");
 const errorHandler_1 = require("../../utils/errorHandler");
 const router = (0, express_1.Router)();
 router.use(auth_middleware_1.authMiddleware);
 // Create transaction
-router.post('/', (0, errorHandler_1.catchAsync)(async (req, res) => {
+router.post('/', featureGate_middleware_1.requireActiveSubscription, (0, errorHandler_1.catchAsync)(async (req, res) => {
     const { items, ...transactionData } = req.body;
     if (!items || !Array.isArray(items) || items.length === 0) {
         throw new errorHandler_1.AppError(400, 'Transaction must have at least one item');
@@ -27,7 +28,7 @@ router.post('/', (0, errorHandler_1.catchAsync)(async (req, res) => {
     });
 }));
 // Batch sync offline transactions
-router.post('/batch', (0, errorHandler_1.catchAsync)(async (req, res) => {
+router.post('/batch', featureGate_middleware_1.requireActiveSubscription, (0, errorHandler_1.catchAsync)(async (req, res) => {
     const { transactions } = req.body;
     if (!transactions || !Array.isArray(transactions)) {
         throw new errorHandler_1.AppError(400, 'Invalid transaction batch format');
@@ -47,12 +48,13 @@ router.post('/batch', (0, errorHandler_1.catchAsync)(async (req, res) => {
 }));
 // Get transactions
 router.get('/', (0, errorHandler_1.catchAsync)(async (req, res) => {
-    const { limit = '50', offset = '0', dateFrom, dateTo, paymentMethod, status } = req.query;
+    const { limit = '50', offset = '0', dateFrom, dateTo, paymentMethod, status, branchId } = req.query;
     const result = await TransactionService_1.TransactionService.getStoreTransactions(req.user.storeId, parseInt(limit), parseInt(offset), {
         dateFrom: dateFrom ? new Date(dateFrom) : undefined,
         dateTo: dateTo ? new Date(dateTo) : undefined,
         paymentMethod: paymentMethod,
-        status: status
+        status: status,
+        branchId: branchId && branchId !== 'null' && branchId !== 'undefined' ? branchId : undefined
     });
     res.json({
         status: 'success',

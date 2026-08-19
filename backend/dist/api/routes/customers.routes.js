@@ -1,12 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
-const client_1 = require("@prisma/client");
+const prisma_1 = require("../../lib/prisma");
 const uuid_1 = require("uuid");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const errorHandler_1 = require("../../utils/errorHandler");
 const router = (0, express_1.Router)();
-const prisma = new client_1.PrismaClient();
 router.use(auth_middleware_1.authMiddleware);
 // ─── Store-isolation helpers ─────────────────────────────────
 /**
@@ -33,7 +32,7 @@ async function assertCustomerAccess(customerId, user) {
         return;
     if (!user?.storeId)
         return;
-    const c = await prisma.customer.findUnique({
+    const c = await prisma_1.prisma.customer.findUnique({
         where: { id: customerId },
         select: { store_id: true }
     });
@@ -51,7 +50,7 @@ router.post('/', (0, errorHandler_1.catchAsync)(async (req, res) => {
     if (!phone && !email) {
         throw new errorHandler_1.AppError(400, 'Phone or email is required');
     }
-    const customer = await prisma.customer.create({
+    const customer = await prisma_1.prisma.customer.create({
         data: {
             id: (0, uuid_1.v4)(),
             store_id: user?.storeId ?? null, // ← tenant tag
@@ -87,13 +86,18 @@ router.get('/', (0, errorHandler_1.catchAsync)(async (req, res) => {
         ];
     }
     const [customers, total] = await Promise.all([
-        prisma.customer.findMany({
+        prisma_1.prisma.customer.findMany({
             where,
+            include: {
+                payments: {
+                    select: { amount: true }
+                }
+            },
             take: parseInt(limit),
             skip: parseInt(offset),
             orderBy: { created_at: 'desc' }
         }),
-        prisma.customer.count({ where })
+        prisma_1.prisma.customer.count({ where })
     ]);
     res.json({
         status: 'success',
@@ -108,7 +112,7 @@ router.get('/', (0, errorHandler_1.catchAsync)(async (req, res) => {
 // ─── Get customer by ID ───────────────────────────────────────
 router.get('/:id', (0, errorHandler_1.catchAsync)(async (req, res) => {
     await assertCustomerAccess(req.params.id, req.user);
-    const customer = await prisma.customer.findUnique({
+    const customer = await prisma_1.prisma.customer.findUnique({
         where: { id: req.params.id }
     });
     if (!customer) {
@@ -122,7 +126,7 @@ router.get('/:id', (0, errorHandler_1.catchAsync)(async (req, res) => {
 // ─── Update customer ──────────────────────────────────────────
 router.patch('/:id', (0, errorHandler_1.catchAsync)(async (req, res) => {
     await assertCustomerAccess(req.params.id, req.user);
-    const customer = await prisma.customer.update({
+    const customer = await prisma_1.prisma.customer.update({
         where: { id: req.params.id },
         data: req.body
     });
@@ -141,14 +145,14 @@ router.get('/:id/history', (0, errorHandler_1.catchAsync)(async (req, res) => {
     if (user?.storeId)
         txWhere.store_id = user.storeId;
     const [transactions, total] = await Promise.all([
-        prisma.transaction.findMany({
+        prisma_1.prisma.transaction.findMany({
             where: txWhere,
             include: { transaction_items: true },
             orderBy: { created_at: 'desc' },
             take: parseInt(limit),
             skip: parseInt(offset)
         }),
-        prisma.transaction.count({ where: txWhere })
+        prisma_1.prisma.transaction.count({ where: txWhere })
     ]);
     res.json({
         status: 'success',
@@ -166,7 +170,7 @@ router.post('/:id/loyalty', (0, errorHandler_1.catchAsync)(async (req, res) => {
     const { points } = req.body;
     if (!points)
         throw new errorHandler_1.AppError(400, 'points is required');
-    const customer = await prisma.customer.update({
+    const customer = await prisma_1.prisma.customer.update({
         where: { id: req.params.id },
         data: { loyalty_points: { increment: points } }
     });
@@ -181,13 +185,13 @@ router.post('/:id/payments', (0, errorHandler_1.catchAsync)(async (req, res) => 
     if (!date)
         throw new errorHandler_1.AppError(400, 'Payment date is required');
     await assertCustomerAccess(req.params.id, user);
-    const customer = await prisma.customer.findUnique({
+    const customer = await prisma_1.prisma.customer.findUnique({
         where: { id: req.params.id }
     });
     if (!customer)
         throw new errorHandler_1.AppError(404, 'Customer not found');
     // Calculate customer's outstanding balance
-    const totalPayments = await prisma.payment.aggregate({
+    const totalPayments = await prisma_1.prisma.payment.aggregate({
         where: { customer_id: req.params.id },
         _sum: { amount: true }
     });
@@ -196,7 +200,7 @@ router.post('/:id/payments', (0, errorHandler_1.catchAsync)(async (req, res) => 
     if (parseFloat(amount) > outstandingBalance) {
         throw new errorHandler_1.AppError(400, `Payment amount (₦${parseFloat(amount).toLocaleString()}) exceeds outstanding balance (₦${Math.max(0, outstandingBalance).toLocaleString()})`);
     }
-    const payment = await prisma.payment.create({
+    const payment = await prisma_1.prisma.payment.create({
         data: {
             id: (0, uuid_1.v4)(),
             customer_id: req.params.id,
@@ -212,13 +216,13 @@ router.post('/:id/payments', (0, errorHandler_1.catchAsync)(async (req, res) => 
 router.get('/:id/payments', (0, errorHandler_1.catchAsync)(async (req, res) => {
     await assertCustomerAccess(req.params.id, req.user);
     const { limit = '50', offset = '0' } = req.query;
-    const customer = await prisma.customer.findUnique({
+    const customer = await prisma_1.prisma.customer.findUnique({
         where: { id: req.params.id }
     });
     if (!customer)
         throw new errorHandler_1.AppError(404, 'Customer not found');
     const [payments, total] = await Promise.all([
-        prisma.payment.findMany({
+        prisma_1.prisma.payment.findMany({
             where: { customer_id: req.params.id },
             orderBy: { date: 'desc' },
             take: parseInt(limit),
@@ -229,7 +233,7 @@ router.get('/:id/payments', (0, errorHandler_1.catchAsync)(async (req, res) => {
                 }
             }
         }),
-        prisma.payment.count({ where: { customer_id: req.params.id } })
+        prisma_1.prisma.payment.count({ where: { customer_id: req.params.id } })
     ]);
     res.json({
         status: 'success',
@@ -245,13 +249,13 @@ router.get('/:id/payments', (0, errorHandler_1.catchAsync)(async (req, res) => {
 router.delete('/:customerId/payments/:paymentId', (0, errorHandler_1.catchAsync)(async (req, res) => {
     const { customerId, paymentId } = req.params;
     await assertCustomerAccess(customerId, req.user);
-    const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
+    const payment = await prisma_1.prisma.payment.findUnique({ where: { id: paymentId } });
     if (!payment)
         throw new errorHandler_1.AppError(404, 'Payment not found');
     if (payment.customer_id !== customerId) {
         throw new errorHandler_1.AppError(400, 'Payment does not belong to this customer');
     }
-    await prisma.payment.delete({ where: { id: paymentId } });
+    await prisma_1.prisma.payment.delete({ where: { id: paymentId } });
     res.json({ status: 'success', message: 'Payment deleted successfully' });
 }));
 exports.default = router;

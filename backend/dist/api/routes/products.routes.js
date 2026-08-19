@@ -1,32 +1,45 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
-const client_1 = require("@prisma/client");
+const prisma_1 = require("../../lib/prisma");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const errorHandler_1 = require("../../utils/errorHandler");
+const branchHelper_1 = require("../../utils/branchHelper");
+const imageProcessor_1 = require("../../utils/imageProcessor");
 const router = (0, express_1.Router)();
-const prisma = new client_1.PrismaClient();
+// POST /v1/products/upload-image (authenticated admin/manager)
+router.post('/upload-image', auth_middleware_1.authMiddleware, (0, errorHandler_1.catchAsync)(async (req, res) => {
+    const user = req.user;
+    const requesterRole = user?.role;
+    if (!['admin', 'manager'].includes(requesterRole ?? '')) {
+        throw new errorHandler_1.AppError(403, 'Only admins or managers can upload product images');
+    }
+    const { image } = req.body;
+    if (!image) {
+        throw new errorHandler_1.AppError(400, 'Image data (base64 string) is required');
+    }
+    const storeId = user.storeId || 'default';
+    const result = await (0, imageProcessor_1.processAndSaveImage)(image, storeId);
+    res.json({
+        status: 'success',
+        data: result
+    });
+}));
 const uuid_1 = require("uuid");
 // Get all products (authenticated — branch scoping requires knowing who's asking)
 router.get('/', auth_middleware_1.authMiddleware, (0, errorHandler_1.catchAsync)(async (req, res) => {
-    const { limit = '100', offset = '0', category_id, search } = req.query;
+    const { offset = '0', category_id, search } = req.query;
+    const requestedLimit = parseInt(req.query.limit ?? '30', 10);
+    const MAX_LIMIT = 10000;
+    const limit = String(isNaN(requestedLimit) || requestedLimit < 1
+        ? 30
+        : Math.min(requestedLimit, MAX_LIMIT));
     const user = req.user;
-    const role = user?.role;
-    const branchId = user?.branchId ?? null;
     const storeId = user?.storeId ?? null;
     const where = { is_active: true };
-    // Branch filtering: admin with ?branch_id query param overrides; otherwise use JWT branchId.
-    // When an admin has no branch assigned, fall back to store-wide scoping so
-    // they never accidentally see another tenant's products.
-    if (role === 'admin' && req.query.branch_id) {
-        where.branch_id = req.query.branch_id;
-    }
-    else if (branchId) {
-        where.branch_id = branchId;
-    }
-    else if (storeId) {
-        where.branch = { store_id: storeId };
-    }
+    // Branch filtering
+    const branchIds = await (0, branchHelper_1.getAuthorizedBranchIds)(req);
+    where.branch_id = { in: branchIds };
     if (category_id) {
         where.category_id = category_id;
     }
@@ -38,13 +51,13 @@ router.get('/', auth_middleware_1.authMiddleware, (0, errorHandler_1.catchAsync)
         ];
     }
     const [products, total] = await Promise.all([
-        prisma.product.findMany({
+        prisma_1.prisma.product.findMany({
             where,
             include: { category: true, inventory: true },
             take: parseInt(limit),
             skip: parseInt(offset)
         }),
-        prisma.product.count({ where })
+        prisma_1.prisma.product.count({ where })
     ]);
     res.json({
         status: 'success',
@@ -58,7 +71,7 @@ router.get('/', auth_middleware_1.authMiddleware, (0, errorHandler_1.catchAsync)
 }));
 // Get single product
 router.get('/:id', (0, errorHandler_1.catchAsync)(async (req, res) => {
-    const product = await prisma.product.findUnique({
+    const product = await prisma_1.prisma.product.findUnique({
         where: { id: req.params.id },
         include: { category: true, inventory: true }
     });
@@ -83,8 +96,20 @@ router.post('/', auth_middleware_1.authMiddleware, (0, errorHandler_1.catchAsync
     base_price, // alias
     cost_price, tax_rate, barcode, image_url, unit, initial_quantity, low_stock_threshold, // store-defined default; falls back to 10
      } = req.body;
-    // Determine branchId: from JWT first, then from req.body as fallback
-    const branchId = user?.branchId ?? req.body.branch_id ?? null;
+    // Determine branchId. Admins explicitly choose the target branch in the UI,
+    // so an admin's body.branch_id MUST win over their own JWT branch. Managers/
+    // cashiers are pinned to their JWT branch.
+    let branchId = requesterRole === 'admin'
+        ? (req.body.branch_id ?? user?.branchId ?? null)
+        : (user?.branchId ?? req.body.branch_id ?? null);
+    if (!branchId && user?.storeId) {
+        const activeBranches = await prisma_1.prisma.branch.findMany({
+            where: { store_id: user.storeId, is_active: true }
+        });
+        if (activeBranches.length === 1) {
+            branchId = activeBranches[0].id;
+        }
+    }
     if (!branchId) {
         throw new errorHandler_1.AppError(400, 'branch_id is required (assign the user to a branch or pass branch_id in request body)');
     }
@@ -95,15 +120,26 @@ router.post('/', auth_middleware_1.authMiddleware, (0, errorHandler_1.catchAsync
         throw new errorHandler_1.AppError(400, 'Required fields: category_id, sku, name, marked_price');
     }
     // Check for duplicate SKU within the same branch
-    const existing = await prisma.product.findFirst({
+    const existing = await prisma_1.prisma.product.findFirst({
         where: { sku, branch_id: branchId }
     });
     if (existing) {
-        throw new errorHandler_1.AppError(409, `SKU "${sku}" already exists in this branch`);
+        throw new errorHandler_1.AppError(409, `SKU "${sku}" already exists in this branch (product "${existing.name}")`);
+    }
+    // Check for duplicate barcode within the same branch (barcode is unique per
+    // branch). Without this, a repeat barcode trips the DB unique constraint and
+    // surfaces as a generic 500 instead of a clear message.
+    if (barcode) {
+        const dupBarcode = await prisma_1.prisma.product.findFirst({
+            where: { barcode, branch_id: branchId }
+        });
+        if (dupBarcode) {
+            throw new errorHandler_1.AppError(409, `Barcode "${barcode}" is already used by "${dupBarcode.name}" in this branch`);
+        }
     }
     // Create product + inventory record in one transaction
     const productId = (0, uuid_1.v4)();
-    await prisma.$transaction(async (tx) => {
+    await prisma_1.prisma.$transaction(async (tx) => {
         await tx.product.create({
             data: {
                 id: productId,
@@ -128,14 +164,14 @@ router.post('/', auth_middleware_1.authMiddleware, (0, errorHandler_1.catchAsync
             data: {
                 id: (0, uuid_1.v4)(),
                 product_id: productId,
-                quantity_on_hand: BigInt(initial_quantity ?? 0),
+                quantity_on_hand: BigInt(Math.max(0, Number(initial_quantity ?? 0))),
                 low_stock_threshold: BigInt(resolvedThreshold),
                 reorder_point: BigInt(Math.max(resolvedThreshold, 20))
             }
         });
     });
     // Re-fetch with category + inventory after transaction commits
-    const product = await prisma.product.findUnique({
+    const product = await prisma_1.prisma.product.findUnique({
         where: { id: productId },
         include: { category: true, inventory: true }
     });
@@ -151,6 +187,30 @@ router.patch('/:id', auth_middleware_1.authMiddleware, (0, errorHandler_1.catchA
         throw new errorHandler_1.AppError(403, 'Only admins or managers can update products');
     }
     const { name, description, category_id, sku, marked_price, effective_price, price, base_price, cost_price, tax_rate, barcode, image_url, unit, is_active } = req.body;
+    // Load the product first so we can scope duplicate checks to its branch and
+    // return a clear 404 if it doesn't exist.
+    const current = await prisma_1.prisma.product.findUnique({ where: { id: req.params.id } });
+    if (!current) {
+        throw new errorHandler_1.AppError(404, 'Product not found');
+    }
+    // Reject duplicate barcode / SKU within the same branch with a clear message
+    // (otherwise the DB unique constraint surfaces as a generic 500).
+    if (barcode !== undefined && barcode) {
+        const dupBarcode = await prisma_1.prisma.product.findFirst({
+            where: { barcode, branch_id: current.branch_id, id: { not: current.id } }
+        });
+        if (dupBarcode) {
+            throw new errorHandler_1.AppError(409, `Barcode "${barcode}" is already used by "${dupBarcode.name}" in this branch`);
+        }
+    }
+    if (sku !== undefined && sku && sku !== current.sku) {
+        const dupSku = await prisma_1.prisma.product.findFirst({
+            where: { sku, branch_id: current.branch_id, id: { not: current.id } }
+        });
+        if (dupSku) {
+            throw new errorHandler_1.AppError(409, `SKU "${sku}" is already used by "${dupSku.name}" in this branch`);
+        }
+    }
     // Build update payload — only include fields that were sent
     const updateData = {};
     if (name !== undefined)
@@ -180,7 +240,7 @@ router.patch('/:id', auth_middleware_1.authMiddleware, (0, errorHandler_1.catchA
         updateData.marked_price = resolvedMarked;
     if (resolvedEffective !== undefined)
         updateData.effective_price = resolvedEffective;
-    const product = await prisma.product.update({
+    const product = await prisma_1.prisma.product.update({
         where: { id: req.params.id },
         data: updateData,
         include: { category: true, inventory: true }
@@ -196,7 +256,7 @@ router.delete('/:id', auth_middleware_1.authMiddleware, (0, errorHandler_1.catch
     if (requesterRole !== 'admin') {
         throw new errorHandler_1.AppError(403, 'Only admins can delete products');
     }
-    await prisma.product.update({
+    await prisma_1.prisma.product.update({
         where: { id: req.params.id },
         data: { is_active: false }
     });
@@ -212,8 +272,6 @@ router.get('/search', auth_middleware_1.authMiddleware, (0, errorHandler_1.catch
         throw new errorHandler_1.AppError(400, 'Search query required');
     }
     const user = req.user;
-    const role = user?.role;
-    const branchId = user?.branchId ?? null;
     const storeId = user?.storeId ?? null;
     const where = {
         is_active: true,
@@ -224,16 +282,9 @@ router.get('/search', auth_middleware_1.authMiddleware, (0, errorHandler_1.catch
             { barcode: { contains: q, mode: 'insensitive' } }
         ]
     };
-    // Branch filtering (same logic as the main list endpoint)
-    if (role === 'admin' && req.query.branch_id) {
-        where.branch_id = req.query.branch_id;
-    }
-    else if (branchId) {
-        where.branch_id = branchId;
-    }
-    else if (storeId) {
-        where.branch = { store_id: storeId };
-    }
+    // Branch filtering
+    const branchIds = await (0, branchHelper_1.getAuthorizedBranchIds)(req);
+    where.branch_id = { in: branchIds };
     if (category_id) {
         where.category_id = category_id;
     }
@@ -245,13 +296,13 @@ router.get('/search', auth_middleware_1.authMiddleware, (0, errorHandler_1.catch
             where.effective_price.lte = parseFloat(max_price);
     }
     const [results, total] = await Promise.all([
-        prisma.product.findMany({
+        prisma_1.prisma.product.findMany({
             where,
-            include: { category: true },
+            include: { category: true, inventory: true },
             take: parseInt(limit),
             skip: parseInt(offset)
         }),
-        prisma.product.count({ where })
+        prisma_1.prisma.product.count({ where })
     ]);
     res.json({
         status: 'success',
@@ -277,12 +328,12 @@ router.post('/bulk', auth_middleware_1.authMiddleware, (0, errorHandler_1.catchA
     }
     // Determine branchId for the bulk import: from JWT or from body-level branch_id
     const defaultBranchId = user?.branchId ?? req.body.branch_id ?? null;
-    const created = await prisma.$transaction(products.map((p) => {
+    const created = await prisma_1.prisma.$transaction(products.map((p) => {
         const productBranchId = p.branch_id ?? defaultBranchId;
         if (!productBranchId) {
             throw new errorHandler_1.AppError(400, `Product "${p.sku}" is missing branch_id`);
         }
-        return prisma.product.create({
+        return prisma_1.prisma.product.create({
             data: {
                 id: (0, uuid_1.v4)(),
                 category_id: p.category_id,
@@ -388,14 +439,14 @@ router.post('/bulk-import', auth_middleware_1.authMiddleware, (0, errorHandler_1
             // Resolve / create category for this branch
             let categoryId = categoryCache.get(row.category);
             if (!categoryId) {
-                const existing = await prisma.category.findFirst({
+                const existing = await prisma_1.prisma.category.findFirst({
                     where: { name: row.category, branch_id: branchId }
                 });
                 if (existing) {
                     categoryId = existing.id;
                 }
                 else {
-                    const created = await prisma.category.create({
+                    const created = await prisma_1.prisma.category.create({
                         data: { name: row.category, branch_id: branchId }
                     });
                     categoryId = created.id;
@@ -426,31 +477,31 @@ router.post('/bulk-import', auth_middleware_1.authMiddleware, (0, errorHandler_1
             // back to barcode match. This makes the import idempotent — repeated
             // runs of the same CSV merge into existing rows instead of erroring on
             // the (barcode, branch_id) unique constraint.
-            let existingProduct = await prisma.product.findFirst({
+            let existingProduct = await prisma_1.prisma.product.findFirst({
                 where: { sku: row.sku, branch_id: branchId }
             });
             if (!existingProduct && productData.barcode) {
-                existingProduct = await prisma.product.findFirst({
+                existingProduct = await prisma_1.prisma.product.findFirst({
                     where: { barcode: productData.barcode, branch_id: branchId }
                 });
             }
             let product;
             if (existingProduct) {
-                product = await prisma.product.update({
+                product = await prisma_1.prisma.product.update({
                     where: { id: existingProduct.id },
                     data: { ...productData, sku: row.sku },
                 });
                 summary.products_updated++;
             }
             else {
-                product = await prisma.product.create({
+                product = await prisma_1.prisma.product.create({
                     data: { ...productData, sku: row.sku },
                 });
                 summary.products_created++;
             }
-            const stock = parseInt(row.initial_stock || '0', 10) || 0;
-            const lowThreshold = parseInt(row.low_stock_threshold || '10', 10) || 10;
-            await prisma.inventory.upsert({
+            const stock = Math.max(0, parseInt(row.initial_stock || '0', 10) || 0);
+            const lowThreshold = Math.max(0, parseInt(row.low_stock_threshold || '10', 10) || 10);
+            await prisma_1.prisma.inventory.upsert({
                 where: { product_id: product.id },
                 update: { quantity_on_hand: stock, low_stock_threshold: lowThreshold },
                 create: {

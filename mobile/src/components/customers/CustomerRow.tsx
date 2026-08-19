@@ -13,6 +13,7 @@ export interface Customer {
   last_transaction_at?: string | null;
   tag?: 'VIP' | 'New' | null;
   tone?: string;
+  payments?: { amount: number }[];
 }
 
 interface CustomerRowProps {
@@ -29,7 +30,12 @@ export default function CustomerRow({
   const initials = `${customer.first_name?.[0] || ''}${customer.last_name?.[0] || ''}`.toUpperCase();
   const toneColor = customer.tone || '#6E56F7';
   const lastText = customer.last_transaction_at ? 'Today' : '—';
-  const spendStr = `₦${(Number(customer.total_spent) || 0).toLocaleString()}`;
+  const totalSpent = Number(customer.total_spent) || 0;
+  const totalPaid = Array.isArray(customer.payments)
+    ? customer.payments.reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0)
+    : 0;
+  const outstanding = Math.max(0, totalSpent - totalPaid);
+  const spendStr = `₦${outstanding.toLocaleString()}`;
 
   return (
     <TouchableOpacity

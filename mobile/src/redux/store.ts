@@ -5,7 +5,9 @@ import inventoryReducer from './slices/inventorySlice';
 import syncReducer from './slices/syncSlice';
 import uiReducer from './slices/uiSlice';
 import customersReducer from './slices/customersSlice';
+import suppliersReducer from './slices/suppliersSlice';
 import subscriptionReducer from './slices/subscriptionSlice';
+import settingsReducer from './slices/settingsSlice';
 import { syncMiddleware } from './middleware/syncMiddleware';
 
 // Define rootReducer separately so RootState can be derived without
@@ -17,7 +19,9 @@ const rootReducer = combineReducers({
   sync: syncReducer,
   ui: uiReducer,
   customers: customersReducer,
+  suppliers: suppliersReducer,
   subscription: subscriptionReducer,
+  settings: settingsReducer,
 });
 
 // RootState is derived from the reducer, not from store.getState,

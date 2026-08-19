@@ -187,13 +187,17 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [range, setRange]           = useState<'today' | 'week'>('today');
   const [branches, setBranches]     = useState<Branch[]>([]);
-  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
+  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(
+    auth.user?.role === 'cashier' ? auth.user?.branch_id : null
+  );
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
 
   useFocusEffect(useCallback(() => {
     loadBranches();
-    load(null);
-  }, []));
+    const initialBranchId = auth.user?.role === 'cashier' ? auth.user?.branch_id : null;
+    setSelectedBranchId(initialBranchId);
+    load(initialBranchId);
+  }, [auth.user?.branch_id, auth.user?.role]));
 
   const loadBranches = async () => {
     try {
@@ -283,11 +287,12 @@ export default function DashboardScreen() {
             <Text style={s.heroEyebrow} numberOfLines={1}>
               {range === 'today' ? 'SALES TODAY' : 'SALES THIS WEEK'}
             </Text>
-            {/* Branch dropdown pill — always visible so admin can filter */}
+            {/* Branch dropdown pill */}
             <TouchableOpacity
               onPress={() => setBranchDropdownOpen(true)}
               activeOpacity={0.75}
               style={s.branchPill}
+              disabled={auth.user?.role === 'cashier' || branches.length <= 1}
             >
               <MaterialCommunityIcons name="source-branch" size={11} color="rgba(255,255,255,0.9)" />
               <Text style={s.branchPillText} numberOfLines={1}>
@@ -295,7 +300,9 @@ export default function DashboardScreen() {
                   ? (branches.find(b => b.id === selectedBranchId)?.name ?? 'Branch')
                   : 'All Branches'}
               </Text>
-              <MaterialCommunityIcons name="chevron-down" size={13} color="rgba(255,255,255,0.9)" />
+              {auth.user?.role !== 'cashier' && branches.length > 1 && (
+                <MaterialCommunityIcons name="chevron-down" size={13} color="rgba(255,255,255,0.9)" />
+              )}
             </TouchableOpacity>
           </View>
           <View style={s.togglePill}>

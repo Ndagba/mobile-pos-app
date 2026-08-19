@@ -1,6 +1,21 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import ImageCacheService from './ImageCacheService';
 
 class DatabaseService {
+  getStoreId(): string | null {
+    try {
+      const { store } = require('../redux/store');
+      return store.getState().auth.user?.store_id || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private getStoreKey(baseKey: string): string {
+    const storeId = this.getStoreId();
+    return storeId ? `${storeId}_${baseKey}` : baseKey;
+  }
+
   async initialize() {
     console.log('Database initialized (AsyncStorage)');
   }
@@ -10,7 +25,7 @@ class DatabaseService {
     try {
       const existing = await this.getAllTransactions();
       existing.push(transaction);
-      await AsyncStorage.setItem('transactions', JSON.stringify(existing));
+      await AsyncStorage.setItem(this.getStoreKey('transactions'), JSON.stringify(existing));
     } catch (error) {
       console.error('Error creating transaction:', error);
       throw error;
@@ -23,7 +38,7 @@ class DatabaseService {
   }
 
   async getAllTransactions() {
-    const data = await AsyncStorage.getItem('transactions');
+    const data = await AsyncStorage.getItem(this.getStoreKey('transactions'));
     return data ? JSON.parse(data) : [];
   }
 
@@ -38,7 +53,7 @@ class DatabaseService {
       const updated = transactions.map((t: any) =>
         t.id === id ? { ...t, is_sync_online: synced } : t
       );
-      await AsyncStorage.setItem('transactions', JSON.stringify(updated));
+      await AsyncStorage.setItem(this.getStoreKey('transactions'), JSON.stringify(updated));
     } catch (error) {
       console.error('Error updating transaction sync status:', error);
       throw error;
@@ -51,7 +66,7 @@ class DatabaseService {
       const updated = transactions.map((t: any) =>
         t.offline_session_hash === hash ? { ...t, is_sync_online: synced } : t
       );
-      await AsyncStorage.setItem('transactions', JSON.stringify(updated));
+      await AsyncStorage.setItem(this.getStoreKey('transactions'), JSON.stringify(updated));
     } catch (error) {
       console.error('Error updating transaction sync status:', error);
       throw error;
@@ -64,7 +79,7 @@ class DatabaseService {
       const existing = await this.getProducts();
       const map = new Map(existing.map((p: any) => [p.id, p]));
       products.forEach((p) => map.set(p.id, p));
-      await AsyncStorage.setItem('products', JSON.stringify(Array.from(map.values())));
+      await AsyncStorage.setItem(this.getStoreKey('products'), JSON.stringify(Array.from(map.values())));
     } catch (error) {
       console.error('Error saving products:', error);
       throw error;
@@ -72,7 +87,7 @@ class DatabaseService {
   }
 
   async getProducts() {
-    const data = await AsyncStorage.getItem('products');
+    const data = await AsyncStorage.getItem(this.getStoreKey('products'));
     return data ? JSON.parse(data) : [];
   }
 
@@ -93,7 +108,7 @@ class DatabaseService {
       const existing = await this.getAllInventory();
       const map = new Map(existing.map((i: any) => [i.product_id, i]));
       inventory.forEach((i) => map.set(i.product_id, i));
-      await AsyncStorage.setItem('inventory', JSON.stringify(Array.from(map.values())));
+      await AsyncStorage.setItem(this.getStoreKey('inventory'), JSON.stringify(Array.from(map.values())));
     } catch (error) {
       console.error('Error saving inventory:', error);
       throw error;
@@ -101,7 +116,7 @@ class DatabaseService {
   }
 
   async getAllInventory() {
-    const data = await AsyncStorage.getItem('inventory');
+    const data = await AsyncStorage.getItem(this.getStoreKey('inventory'));
     return data ? JSON.parse(data) : [];
   }
 
@@ -116,7 +131,7 @@ class DatabaseService {
       const existing = await this.getCustomers();
       const map = new Map(existing.map((c: any) => [c.id, c]));
       customers.forEach((c) => map.set(c.id, c));
-      await AsyncStorage.setItem('customers', JSON.stringify(Array.from(map.values())));
+      await AsyncStorage.setItem(this.getStoreKey('customers'), JSON.stringify(Array.from(map.values())));
     } catch (error) {
       console.error('Error saving customers:', error);
       throw error;
@@ -124,7 +139,7 @@ class DatabaseService {
   }
 
   async getCustomers() {
-    const data = await AsyncStorage.getItem('customers');
+    const data = await AsyncStorage.getItem(this.getStoreKey('customers'));
     return data ? JSON.parse(data) : [];
   }
 
@@ -136,7 +151,9 @@ class DatabaseService {
   // Generic API response cache — used for stale-while-revalidate page loads.
   async getApiCache<T = any>(key: string): Promise<T | null> {
     try {
-      const data = await AsyncStorage.getItem(`apicache_${key}`);
+      const storeId = this.getStoreId();
+      const storageKey = storeId ? `apicache_${storeId}_${key}` : `apicache_${key}`;
+      const data = await AsyncStorage.getItem(storageKey);
       return data ? (JSON.parse(data) as T) : null;
     } catch {
       return null;
@@ -145,7 +162,9 @@ class DatabaseService {
 
   async setApiCache(key: string, data: any) {
     try {
-      await AsyncStorage.setItem(`apicache_${key}`, JSON.stringify(data));
+      const storeId = this.getStoreId();
+      const storageKey = storeId ? `apicache_${storeId}_${key}` : `apicache_${key}`;
+      await AsyncStorage.setItem(storageKey, JSON.stringify(data));
     } catch {}
   }
 
@@ -155,9 +174,41 @@ class DatabaseService {
 
   async clearAllData() {
     try {
-      await AsyncStorage.multiRemove(['transactions', 'products', 'inventory']);
+      await AsyncStorage.multiRemove([
+        this.getStoreKey('transactions'),
+        this.getStoreKey('products'),
+        this.getStoreKey('inventory'),
+        this.getStoreKey('customers')
+      ]);
     } catch (error) {
       console.error('Error clearing data:', error);
+      throw error;
+    }
+  }
+
+  async clearCurrentStoreCache() {
+    try {
+      const storeId = this.getStoreId();
+      if (!storeId) return;
+
+      const keys = await AsyncStorage.getAllKeys();
+      // Remove products, inventory, customers, apicaches and api client caches for the current store.
+      // EXCLUDE transaction logs to prevent data loss.
+      const storeKeys = keys.filter(
+        (key) =>
+          (key.startsWith(`${storeId}_`) && !key.endsWith('_transactions')) ||
+          key.startsWith(`apicache_${storeId}_`) ||
+          key.startsWith(`cache_${storeId}_`)
+      );
+
+      if (storeKeys.length > 0) {
+        await AsyncStorage.multiRemove(storeKeys);
+      }
+      // Clear locally cached product image thumbnails
+      await ImageCacheService.clearStoreCache(storeId);
+      console.log(`Cleared ${storeKeys.length} cache keys for store ${storeId}`);
+    } catch (error) {
+      console.error('Error clearing store cache:', error);
       throw error;
     }
   }

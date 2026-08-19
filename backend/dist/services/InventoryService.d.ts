@@ -1,15 +1,8 @@
 export declare class InventoryService {
-    static getInventoryStatus(storeId?: string): Promise<{
-        product_id: string;
-        product_name: string;
-        sku: string;
-        quantity_on_hand: bigint;
-        quantity_reserved: bigint;
-        available_quantity: bigint;
-        low_stock_threshold: bigint;
-        status: string;
-    }[]>;
-    static getLowStockAlerts(storeId?: string, branchId?: string | null): Promise<{
+    static getInventoryStatus(storeId?: string, cursor?: string, limit?: number): Promise<any>;
+    private static getStoreIdForProduct;
+    private static invalidateInventoryCache;
+    static getLowStockAlerts(storeId?: string, branchIds?: string[]): Promise<{
         product_id: any;
         product_name: any;
         sku: any;

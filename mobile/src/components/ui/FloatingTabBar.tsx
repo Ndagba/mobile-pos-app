@@ -5,6 +5,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, R } from '../../theme';
+import { useSelector } from 'react-redux';
+import { RootState } from '../../redux/store';
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
@@ -12,12 +14,16 @@ const TAB_META: Record<string, { icon: IconName; label: string }> = {
   Dashboard: { icon: 'view-dashboard',          label: 'Home'      },
   Inventory: { icon: 'package-variant',         label: 'Inventory' },
   Customers: { icon: 'account-multiple',       label: 'Customers' },
+  Suppliers: { icon: 'truck-outline',           label: 'Suppliers' },
   Analytics: { icon: 'chart-bar',               label: 'Analytics' },
   Settings:  { icon: 'cog',                     label: 'Settings'  },
 };
 
 export default function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const settings = useSelector((state: RootState) => state.settings.settings);
+  const auth = useSelector((state: RootState) => state.auth);
+  const role = auth.user?.role ?? 'cashier';
 
   const handleNewSale = () => {
     const parent = navigation.getParent();
@@ -26,7 +32,18 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
     }
   };
 
-  const visibleRoutes = state.routes.filter(r => TAB_META[r.name]);
+  const visibleRoutes = state.routes.filter(r => {
+    if (!TAB_META[r.name]) return false;
+    if (r.name === 'Customers') {
+      const isEnabled = settings?.customer_menu_enabled ?? true;
+      if (role === 'cashier' && !isEnabled) return false;
+    }
+    if (r.name === 'Suppliers') {
+      const isEnabled = settings?.supplier_menu_enabled ?? true;
+      if (role === 'cashier' && !isEnabled) return false;
+    }
+    return true;
+  });
 
   // 5 tabs split as: 2 left / FAB / 3 right
   const fabIndex = 2;

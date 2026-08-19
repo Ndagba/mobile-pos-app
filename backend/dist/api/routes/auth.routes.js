@@ -12,9 +12,11 @@ const router = (0, express_1.Router)();
 // Brute-force protection for credential endpoints only.
 // Raised limits in dev so hot-reloads and retries don't cause 429s.
 const isDev = process.env.NODE_ENV !== 'production';
+const authRateLimitWindowMs = parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS || '900000', 10);
+const authRateLimitMax = parseInt(process.env.AUTH_RATE_LIMIT_MAX || (isDev ? '200' : '50'), 10);
 const credentialLimiter = (0, express_rate_limit_1.default)({
-    windowMs: 15 * 60 * 1000,
-    max: isDev ? 200 : 10,
+    windowMs: authRateLimitWindowMs,
+    max: authRateLimitMax,
     skipSuccessfulRequests: true,
     standardHeaders: true,
     legacyHeaders: false,

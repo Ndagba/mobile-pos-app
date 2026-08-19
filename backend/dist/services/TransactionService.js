@@ -5,16 +5,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TransactionService = void 0;
 const uuid_1 = require("uuid");
-const client_1 = require("@prisma/client");
+const prisma_1 = require("../lib/prisma");
 const errorHandler_1 = require("../utils/errorHandler");
 const logger_1 = require("../utils/logger");
 const crypto_1 = __importDefault(require("crypto"));
-const prisma = new client_1.PrismaClient();
 class TransactionService {
     static async createTransaction(input) {
         try {
             // Validate offline session hash uniqueness (idempotency)
-            const existing = await prisma.transaction.findFirst({
+            const existing = await prisma_1.prisma.transaction.findFirst({
                 where: { offline_session_hash: input.offline_session_hash }
             });
             if (existing) {
@@ -29,7 +28,7 @@ class TransactionService {
             const transactionId = (0, uuid_1.v4)();
             const receiptNumber = `RCP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
             // Start transaction
-            const transaction = await prisma.$transaction(async (tx) => {
+            const transaction = await prisma_1.prisma.$transaction(async (tx) => {
                 // Create transaction
                 const createdTx = await tx.transaction.create({
                     data: {
@@ -75,6 +74,18 @@ class TransactionService {
                             }
                         }
                     });
+                    await tx.inventoryMovement.create({
+                        data: {
+                            store_id: input.store_id,
+                            branch_id: input.branch_id,
+                            product_id: item.product_id,
+                            movement_type: 'sale',
+                            quantity: BigInt(-item.quantity),
+                            reference_id: transactionId,
+                            notes: 'Sale transaction',
+                            user_id: input.user_id
+                        }
+                    });
                 }
                 // Update customer stats if exists
                 if (input.customer_id) {
@@ -93,6 +104,19 @@ class TransactionService {
                 }
                 return createdTx;
             });
+            if (input.discount_amount > 0) {
+                await prisma_1.prisma.auditLog.create({
+                    data: {
+                        store_id: input.store_id,
+                        branch_id: input.branch_id,
+                        user_id: input.user_id,
+                        action: 'APPLY_DISCOUNT',
+                        resource_type: 'Transaction',
+                        resource_id: transactionId,
+                        changes: { discount_amount: input.discount_amount, total_amount: input.total_amount }
+                    }
+                });
+            }
             logger_1.logger.info({
                 event: 'transaction_created',
                 transaction_id: transactionId,
@@ -140,7 +164,7 @@ class TransactionService {
         return { results, errors };
     }
     static async getTransactionById(transactionId) {
-        const transaction = await prisma.transaction.findUnique({
+        const transaction = await prisma_1.prisma.transaction.findUnique({
             where: { id: transactionId },
             include: {
                 transaction_items: {
@@ -189,8 +213,11 @@ class TransactionService {
         if (filters?.status) {
             where.status = filters.status;
         }
-        const [transactions, total] = await Promise.all([
-            prisma.transaction.findMany({
+        if (filters?.branchId) {
+            where.branch_id = filters.branchId;
+        }
+        const [transactions, total, sums] = await Promise.all([
+            prisma_1.prisma.transaction.findMany({
                 where,
                 include: {
                     user: { select: { first_name: true } },
@@ -201,14 +228,23 @@ class TransactionService {
                 take: limit,
                 skip: offset
             }),
-            prisma.transaction.count({ where })
+            prisma_1.prisma.transaction.count({ where }),
+            prisma_1.prisma.transaction.groupBy({
+                by: ['status'],
+                where,
+                _sum: { total_amount: true }
+            })
         ]);
         const data = transactions.map((tx) => ({
             ...tx,
             item_count: tx._count?.transaction_items ?? 0
         }));
+        const completedSum = sums.find(s => s.status === 'completed')?._sum.total_amount || 0;
+        const refundedSum = sums.find(s => s.status === 'refunded')?._sum.total_amount || 0;
+        const netSum = Number(completedSum) - Number(refundedSum);
         return {
             data,
+            netSum,
             pagination: {
                 limit,
                 offset,
@@ -219,7 +255,7 @@ class TransactionService {
     }
     static async voidTransaction(transactionId, voidReason, voidedByUserId) {
         try {
-            const transaction = await prisma.transaction.findUnique({
+            const transaction = await prisma_1.prisma.transaction.findUnique({
                 where: { id: transactionId },
                 include: { transaction_items: true }
             });
@@ -230,7 +266,7 @@ class TransactionService {
                 throw new errorHandler_1.AppError(400, 'Transaction already voided');
             }
             // Restore inventory
-            await prisma.$transaction(async (tx) => {
+            await prisma_1.prisma.$transaction(async (tx) => {
                 for (const item of transaction.transaction_items) {
                     await tx.inventory.update({
                         where: { product_id: item.product_id },
@@ -238,6 +274,18 @@ class TransactionService {
                             quantity_on_hand: {
                                 increment: item.quantity
                             }
+                        }
+                    });
+                    await tx.inventoryMovement.create({
+                        data: {
+                            store_id: transaction.store_id,
+                            branch_id: transaction.branch_id,
+                            product_id: item.product_id,
+                            movement_type: 'adjustment',
+                            quantity: BigInt(item.quantity),
+                            reference_id: transactionId,
+                            notes: 'Transaction voided',
+                            user_id: voidedByUserId
                         }
                     });
                 }
@@ -253,7 +301,7 @@ class TransactionService {
                 });
             });
             // Log audit
-            await prisma.auditLog.create({
+            await prisma_1.prisma.auditLog.create({
                 data: {
                     user_id: voidedByUserId,
                     action: 'VOID_TRANSACTION',
@@ -284,7 +332,7 @@ class TransactionService {
     }
     static async refundTransaction(transactionId, reason, refundedByUserId) {
         try {
-            const transaction = await prisma.transaction.findUnique({
+            const transaction = await prisma_1.prisma.transaction.findUnique({
                 where: { id: transactionId },
                 include: { transaction_items: true }
             });
@@ -294,12 +342,24 @@ class TransactionService {
             if (transaction.status === 'refunded' || transaction.status === 'voided') {
                 throw new errorHandler_1.AppError(400, `Transaction already ${transaction.status}`);
             }
-            await prisma.$transaction(async (tx) => {
+            await prisma_1.prisma.$transaction(async (tx) => {
                 // Restore inventory for each item
                 for (const item of transaction.transaction_items) {
                     await tx.inventory.update({
                         where: { product_id: item.product_id },
                         data: { quantity_on_hand: { increment: item.quantity } }
+                    });
+                    await tx.inventoryMovement.create({
+                        data: {
+                            store_id: transaction.store_id,
+                            branch_id: transaction.branch_id,
+                            product_id: item.product_id,
+                            movement_type: 'adjustment',
+                            quantity: BigInt(item.quantity),
+                            reference_id: transactionId,
+                            notes: 'Transaction refunded',
+                            user_id: refundedByUserId
+                        }
                     });
                 }
                 // Reverse customer stats so the refund doesn't inflate lifetime totals
@@ -323,7 +383,7 @@ class TransactionService {
                     }
                 });
             });
-            await prisma.auditLog.create({
+            await prisma_1.prisma.auditLog.create({
                 data: {
                     user_id: refundedByUserId,
                     action: 'REFUND_TRANSACTION',
@@ -354,7 +414,7 @@ class TransactionService {
         return crypto_1.default.createHash('sha256').update(data).digest('hex');
     }
     static async getByOfflineHash(offlineSessionHash) {
-        return prisma.transaction.findUnique({
+        return prisma_1.prisma.transaction.findUnique({
             where: { offline_session_hash: offlineSessionHash },
             include: { transaction_items: true }
         });
@@ -364,7 +424,7 @@ class TransactionService {
         startOfDay.setHours(0, 0, 0, 0);
         const endOfDay = new Date(date);
         endOfDay.setHours(23, 59, 59, 999);
-        const result = await prisma.transaction.aggregate({
+        const result = await prisma_1.prisma.transaction.aggregate({
             where: {
                 store_id: storeId,
                 created_at: {
@@ -385,7 +445,7 @@ class TransactionService {
         };
     }
     static async exportTransactions(storeId, dateFrom, dateTo, format = 'csv') {
-        const transactions = await prisma.transaction.findMany({
+        const transactions = await prisma_1.prisma.transaction.findMany({
             where: {
                 store_id: storeId,
                 created_at: {

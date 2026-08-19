@@ -10,7 +10,11 @@ const authMiddleware = async (req, res, next) => {
             throw new errorHandler_1.AppError(401, 'No authorization token provided');
         }
         const decoded = await AuthService_1.AuthService.validateToken(token);
-        req.user = decoded;
+        req.user = {
+            ...decoded,
+            id: decoded.userId || decoded.id,
+            userId: decoded.userId || decoded.id
+        };
         next();
     }
     catch (error) {

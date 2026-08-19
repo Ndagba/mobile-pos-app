@@ -1,0 +1,165 @@
+category,name,sku,barcode,selling_price,cost_price,tax_rate,unit,initial_stock,low_stock_threshold,description
+Water,Mr. V Bottle Water,W-0001,,2100,1900,0,pack,55,10,Mr. V Bottle Water
+Water,Cway Water 75cl,W-0002,,2100,1900,0,pack,42,10,Cway Water 75cl
+Water,Cway Water 50cl,W-0003,,2900,2800,0,pack,95,10,Cway Water 50cl
+Water,Aquafina Water 75cl,W-0004,,2100,1850,0,pack,110,10,Aquafina Water 75cl
+Water,Nestle Water 60cl,W-0005,,3700,3540,0,pack,54,10,Nestle Water 60cl
+Water,Nestle Zinc,W-0006,,4000,3850,0,pack,17,10,Nestle Zinc
+Water,Nestle Water 1.5litre,W-0007,,4000,3900,0,pack,15,10,Nestle Water 1.5litre
+Water,Nestle Water 33cl,W-0008,,3000,2900,0,pack,0,10,Nestle Water 33cl
+Water,Goje Water 75cl,W-0009,,2200,2000,0,pack,29,10,Goje Water 75cl
+Water,Goje Water 35cl,W-0010,,1700,1500,0,pack,57,10,Goje Water 35cl
+Water,Goje Water 33cl,W-0011,,1400,1300,0,pack,0,10,Goje Water 33cl
+Water,Goje Water 50cl,W-0012,,1900,1800,0,pack,0,10,Goje Water 50cl
+Water,Golden Age Water 35cl,W-0013,,2300,2050,0,pack,19,10,Golden Age Water 35cl
+Water,Gracias Bottle Water 35cl,W-0014,,1300,1150,0,pack,1,10,Gracias Bottle Water 35cl
+Water,Dispenser Water,W-0015,,1800,1700,0,pack,72,10,Dispenser Water
+Soft Drinks,Big Coke,SD-0016,,4500,4400,0,pack,69,10,Big Coke
+Soft Drinks,Small Coke,SD-0017,,3100,2900,0,pack,59,10,Small Coke
+Soft Drinks,Zero Coke,SD-0018,,3500,3000,0,pack,7,10,Zero Coke
+Soft Drinks,Pop Cola,SD-0019,,2100,2050,0,pack,155,10,Pop Cola
+Soft Drinks,Teem,SD-0020,,4200,4100,0,pack,27,10,Teem
+Soft Drinks,Mirinda,SD-0021,,2700,2500,0,pack,37,10,Mirinda
+Soft Drinks,Big Mirinda,SD-0022,,4200,4000,0,pack,10,10,Big Mirinda
+Soft Drinks,Rubber Schweppes,SD-0023,,4900,4600,0,pack,17,10,Rubber Schweppes
+Juices & Fruit Drinks,Rubber Lucozade X6,J&FD-0024,,,,0,pack,0,10,Rubber Lucozade X6
+Juices & Fruit Drinks,Rubber Ribena X6,J&FD-0025,,,,0,pack,0,10,Rubber Ribena X6
+Juices & Fruit Drinks,Rubber Lucozade X12,J&FD-0026,,12000,11550,0,pack,7,10,Rubber Lucozade X12
+Energy Drinks,Fearless Energy Drink,ED-0027,,4600,4500,0,pack,73,10,Fearless Energy Drink
+Energy Drinks,Predator Energy Drink,ED-0028,,5000,4900,0,pack,57,10,Predator Energy Drink
+Energy Drinks,Infinite Power,ED-0029,,3800,3600,0,pack,30,10,Infinite Power
+Energy Drinks,Pop Power,ED-0030,,2800,2600,0,pack,0,10,Pop Power
+Juices & Fruit Drinks,V Cool,J&FD-0031,,3500,3300,0,pack,9,10,V Cool
+Soft Drinks,Small Lacasera,SD-0032,,2800,2600,0,pack,8,10,Small Lacasera
+Soft Drinks,Small Smoov,SD-0033,,2800,2700,0,pack,0,10,Small Smoov
+Dairy & Milk Drinks,Big Nutri Milk,D&MD-0034,,5600,5400,0,pack,0,10,Big Nutri Milk
+Dairy & Milk Drinks,Big Nutriyo X12,D&MD-0035,,6500,6300,0,pack,0,10,Big Nutriyo X12
+Dairy & Milk Drinks,Nutri Bobo,D&MD-0036,,5300,5100,0,pack,6,10,Nutri Bobo
+Dairy & Milk Drinks,Nutri Choco,D&MD-0037,,8500,8200,0,pack,0,10,Nutri Choco
+Dairy & Milk Drinks,Nutriyo X24 125ml,D&MD-0038,,4000,3700,0,pack,3,10,Nutriyo X24 125ml
+General Merchandise,Happy Hour 125ml,GM-0039,,3800,3500,0,pack,20,10,Happy Hour 125ml
+Juices & Fruit Drinks,Ribena 125ml X16,J&FD-0040,,4800,4000,0,pack,1,10,Ribena 125ml X16
+Juices & Fruit Drinks,Ribena 250ml X12,J&FD-0041,,7000,6500,0,pack,0,10,Ribena 250ml X12
+Juices & Fruit Drinks,Lucozade Boost 250ml X12,J&FD-0042,,7000,6500,0,pack,0,10,Lucozade Boost 250ml X12
+Juices & Fruit Drinks,Yugo Drink,J&FD-0043,,6800,6700,0,pack,9,10,Yugo Drink
+Juices & Fruit Drinks,Small 5 Alive,J&FD-0044,,5500,4700,0,pack,3,10,Small 5 Alive
+Juices & Fruit Drinks,Pulpy 5 Alive,J&FD-0045,,8000,6600,0,pack,0,10,Pulpy 5 Alive
+Juices & Fruit Drinks,Berry Blast 5 Alive,J&FD-0046,,8000,7600,0,pack,0,10,Berry Blast 5 Alive
+Juices & Fruit Drinks,Pulpy 5 Alive Retail,J&FD-0047,,1400,1100,0,pack,6,10,Pulpy 5 Alive Retail
+General Merchandise,Berry Blast 5alive Retail,GM-0048,,1400,1262,0,pack,0,10,Berry Blast 5alive Retail
+Water,Faruk Water 50cl,W-0049,,2500,2400,0,pack,7,10,Faruk Water 50cl
+Juices & Fruit Drinks,Cway Peach,J&FD-0050,,6500,6050,0,pack,4,10,Cway Peach
+Soft Drinks,Big Sosa,SD-0051,,6500,5800,0,pack,11,10,Big Sosa
+Soft Drinks,Small Sosa,SD-0052,,5000,4500,0,pack,0,10,Small Sosa
+Dairy & Milk Drinks,Viju Milk X24 Bb Star,D&MD-0053,,5000,4900,0,pack,25,10,Viju Milk X24 Bb Star
+Malt Drinks,Maltina Pet,MD-0054,,5500,5100,0,pack,33,10,Maltina Pet
+Soft Drinks,Can Coke,SD-0055,,2875,2800,0,pack,55,10,Can Coke
+Soft Drinks,Can Schweppes,SD-0056,,2875,2800,0,pack,36,10,Can Schweppes
+General Merchandise,Can Fayrouz,GM-0057,,3750,2800,0,pack,14,10,Can Fayrouz
+Malt Drinks,Maltina Can,MD-0058,,3200,3000,0,pack,191,10,Maltina Can
+Malt Drinks,Dubic Can Malt,MD-0059,,2875,2800,0,pack,40,10,Dubic Can Malt
+Malt Drinks,Malta Guinness Can,MD-0060,,3000,2900,0,pack,0,10,Malta Guinness Can
+Malt Drinks,Amstel Malt Low Sugar,MD-0061,,3500,3400,0,pack,0,10,Amstel Malt Low Sugar
+Malt Drinks,Amstel Malt Ultra,MD-0062,,4000,3900,0,pack,12,10,Amstel Malt Ultra
+Juices & Fruit Drinks,Can Pure Heaven,J&FD-0063,,8750,8600,0,pack,0,10,Can Pure Heaven
+Juices & Fruit Drinks,Can Pure Heaven Retail,J&FD-0064,,9000,8500,0,pack,0,10,Can Pure Heaven Retail
+Juices & Fruit Drinks,Can Pure Heaven Pieces,J&FD-0065,,1500,1400,0,pack,4,10,Can Pure Heaven Pieces
+Juices & Fruit Drinks,Can Ceres,J&FD-0066,,10000,9500,0,pack,2,10,Can Ceres
+Juices & Fruit Drinks,Bottle Ceres,J&FD-0067,,12500,1200,0,pack,1,10,Bottle Ceres
+Juices & Fruit Drinks,Can Soursop,J&FD-0068,,8750,8600,0,pack,21,10,Can Soursop
+Juices & Fruit Drinks,Can Veleta,J&FD-0069,,7500,7400,0,pack,6,10,Can Veleta
+Juices & Fruit Drinks,Can Imperial,J&FD-0070,,4000,3900,0,pack,0,10,Can Imperial
+Juices & Fruit Drinks,Can Tomi,J&FD-0071,,4000,3900,0,pack,0,10,Can Tomi
+Energy Drinks,Big Power Horse,ED-0072,,7500,7400,0,pack,0,10,Big Power Horse
+Energy Drinks,Small Power Horse,ED-0073,,5500,5400,0,pack,0,10,Small Power Horse
+Energy Drinks,Big Power Horse X16,ED-0074,,21500,19500,0,pack,2,10,Big Power Horse X16
+Dairy & Milk Drinks,Vita Milk,D&MD-0075,,10000,9500,0,pack,12,10,Vita Milk
+Dairy & Milk Drinks,Retail Vita Milk,D&MD-0076,,1700,1417,0,pack,4,10,Retail Vita Milk
+Juices & Fruit Drinks,Exotic 1litre,J&FD-0077,,15000,14200,0,pack,9,10,Exotic 1litre
+Juices & Fruit Drinks,Exotic Medium 500ml,J&FD-0078,,9000,8500,0,pack,0,10,Exotic Medium 500ml
+Juices & Fruit Drinks,Exotic 315ml,J&FD-0079,,4500,4200,0,pack,2,10,Exotic 315ml
+Juices & Fruit Drinks,Exotic 125ml,J&FD-0080,,7500,7100,0,pack,8,10,Exotic 125ml
+Juices & Fruit Drinks,Exotic Can,J&FD-0081,,,,0,pack,0,10,Exotic Can
+Juices & Fruit Drinks,Retail Exotic 1litre,J&FD-0082,,1600,1420,0,pack,2,10,Retail Exotic 1litre
+Juices & Fruit Drinks,Chivita Low Sugar,J&FD-0083,,22000,20800,0,pack,6,10,Chivita Low Sugar
+Juices & Fruit Drinks,Chivita Active 1litre,J&FD-0084,,16000,15000,0,pack,3,10,Chivita Active 1litre
+Juices & Fruit Drinks,Chivita Active 315ml,J&FD-0085,,7500,7000,0,pack,0,10,Chivita Active 315ml
+Juices & Fruit Drinks,Chivita Zest 1litre,J&FD-0086,,13000,12000,0,pack,0,10,Chivita Zest 1litre
+Juices & Fruit Drinks,Chivita Zest 125ml,J&FD-0087,,4000,3800,0,pack,0,10,Chivita Zest 125ml
+Juices & Fruit Drinks,Retail Chivita Low Sugar 1litre,J&FD-0088,,2300,2080,0,pack,12,10,Retail Chivita Low Sugar 1litre
+Dairy & Milk Drinks,Hollandia Yoghurt 1litre,D&MD-0089,,16500,15800,0,pack,4,10,Hollandia Yoghurt 1litre
+Dairy & Milk Drinks,Medium Hollandia 500ml,D&MD-0090,,10000,9500,0,pack,6,10,Medium Hollandia 500ml
+Dairy & Milk Drinks,Hollandia Yoghurt 90ml X24,D&MD-0091,,4000,3500,0,pack,17,10,Hollandia Yoghurt 90ml X24
+Dairy & Milk Drinks,Hollandia Milk 1litre,D&MD-0092,,23000,22000,0,pack,0,10,Hollandia Milk 1litre
+Dairy & Milk Drinks,Hollandia Milk 190g X24,D&MD-0093,,22000,21000,0,pack,0,10,Hollandia Milk 190g X24
+Dairy & Milk Drinks,Hollandia Milk 190g X24 Retail,D&MD-0094,,900,875,0,pack,8,10,Hollandia Milk 190g X24 Retail
+Dairy & Milk Drinks,Hollandia Milk 120g X24,D&MD-0095,,11500,10500,0,pack,1,10,Hollandia Milk 120g X24
+Dairy & Milk Drinks,Hollandia Milk 120g X24 Retail,D&MD-0096,,550,438,0,pack,14,10,Hollandia Milk 120g X24 Retail
+Dairy & Milk Drinks,Hollandia 315ml,D&MD-0097,,8000,7500,0,pack,0,10,Hollandia 315ml
+Dairy & Milk Drinks,Hollandia 180ml,D&MD-0098,,,,0,pack,0,10,Hollandia 180ml
+Biscuits & Snacks,Cabin Biscuit,B&S-0099,,1000,875,0,pack,12,10,Cabin Biscuit
+General Merchandise,Ban Ban Stick,GM-0100,,2200,2100,0,pack,1,10,Ban Ban Stick
+Biscuits & Snacks,Good Time Biscuit,B&S-0101,,2300,2100,0,pack,3,10,Good Time Biscuit
+Biscuits & Snacks,Bee Crunchy Biscuit,B&S-0102,,4500,4200,0,pack,0,10,Bee Crunchy Biscuit
+Biscuits & Snacks,Big Top Biscuit,B&S-0103,,4500,4200,0,pack,6,10,Big Top Biscuit
+Biscuits & Snacks,Top Biscuit,B&S-0104,,3500,3300,0,pack,0,10,Top Biscuit
+Biscuits & Snacks,Big Parle G,B&S-0105,,4500,4200,0,pack,1,10,Big Parle G
+Biscuits & Snacks,Small Parle G,B&S-0106,,3500,3300,0,pack,0,10,Small Parle G
+Biscuits & Snacks,Butter Cookies,B&S-0107,,4500,4200,0,pack,1,10,Butter Cookies
+Dairy & Milk Drinks,All Milk Biscuit,D&MD-0108,,2300,2100,0,pack,0,10,All Milk Biscuit
+Biscuits & Snacks,Pure Bliss Biscuit,B&S-0109,,2300,2100,0,pack,1,10,Pure Bliss Biscuit
+General Merchandise,Pure Bliss X12,GM-0110,,1200,1067,0,pack,0,10,Pure Bliss X12
+General Merchandise,Pure Bliss Gold,GM-0111,,6500,6300,0,pack,0,10,Pure Bliss Gold
+Soft Drinks,Chocolate Pure Bliss,SD-0112,,,,0,pack,0,10,Chocolate Pure Bliss
+Confectionery,Tom Tom X24,C-0113,,1000,875,0,pack,8,10,Tom Tom X24
+Confectionery,Butter Mint X24,C-0114,,1000,792,0,pack,12,10,Butter Mint X24
+Packaging & Disposables,Disposable Cup Red,P&D-0115,,2000,1800,0,pack,13,10,Disposable Cup Red
+Packaging & Disposables,Disposable Cup White,P&D-0116,,700,600,0,pack,29,10,Disposable Cup White
+Packaging & Disposables,White Spoon,P&D-0117,,900,800,0,pack,61,10,White Spoon
+General Merchandise,Big Thank You,GM-0118,,1250,1200,0,pack,1,10,Big Thank You
+General Merchandise,Small Thank You,GM-0119,,1500,1400,0,pack,5,10,Small Thank You
+Packaging & Disposables,Take Away Leather,P&D-0120,,1800,1700,0,pack,9,10,Take Away Leather
+Packaging & Disposables,Foam Take Away,P&D-0121,,2000,1900,0,pack,0,10,Foam Take Away
+Packaging & Disposables,"Straw-2,000",P&D-0122,,2000,1800,0,pack,13,10,"Straw-2,000"
+Packaging & Disposables,"Straw-2,500",P&D-0123,,2500,2200,0,pack,0,10,"Straw-2,500"
+Biscuits & Snacks,Mc Vities Digestive,B&S-0124,,1500,1125,0,pack,6,10,Mc Vities Digestive
+Biscuits & Snacks,Mc Vities Hob Nobs,B&S-0125,,1500,1125,0,pack,2,10,Mc Vities Hob Nobs
+General Merchandise,Choco Rings,GM-0126,,4500,4200,0,pack,0,10,Choco Rings
+Biscuits & Snacks,Supreme Digestive,B&S-0127,,5500,5200,0,pack,0,10,Supreme Digestive
+Malt Drinks,Bottle Maltina,MD-0128,,3625,3500,0,pack,16,10,Bottle Maltina
+Soft Drinks,Big Sosa Retail,SD-0129,,1200,967,0,pack,4,10,Big Sosa Retail
+Wine & Honey,Pure Honey,W&H-0130,,9000,7500,0,pack,3,10,Pure Honey
+Wine & Honey,Nigerian Wine,W&H-0131,,2500,1333,0,pack,56,10,Nigerian Wine
+Juices & Fruit Drinks,Pure Heaven Wine,J&FD-0132,,5500,3250,0,pack,23,10,Pure Heaven Wine
+Juices & Fruit Drinks,Veleta Wine,J&FD-0133,,5000,2917,0,pack,20,10,Veleta Wine
+Tissue & Paper Products,Tissue Box,T&PP-0134,,1400,1208,0,pack,21,10,Tissue Box
+Tissue & Paper Products,Rose Carla Tissue,T&PP-0135,,5500,5200,0,pack,5,10,Rose Carla Tissue
+General Merchandise,Rose Plus,GM-0136,,1400,1200,0,pack,2,10,Rose Plus
+General Merchandise,Rose Plus X6,GM-0137,,1700,1438,0,pack,9,10,Rose Plus X6
+Tissue & Paper Products,Vivian Serviette,T&PP-0138,,400,375,0,pack,38,10,Vivian Serviette
+Packaging & Disposables,Big Yena Plate,P&D-0139,,5000,4500,0,pack,0,10,Big Yena Plate
+Packaging & Disposables,Small Yena Plate,P&D-0140,,4000,3500,0,pack,4,10,Small Yena Plate
+Dairy & Milk Drinks,Peak Yoghurt 1litre,D&MD-0141,,16000,15000,0,pack,0,10,Peak Yoghurt 1litre
+Dairy & Milk Drinks,Peak Yoghurt 1litre  Retail,D&MD-0142,,1700,1500,0,pack,7,10,Peak Yoghurt 1litre  Retail
+Dairy & Milk Drinks,Peak Yoghurt 318ml,D&MD-0143,,7000,6500,0,pack,0,10,Peak Yoghurt 318ml
+Dairy & Milk Drinks,Peak Yoghurt 90ml,D&MD-0144,,3000,2700,0,pack,0,10,Peak Yoghurt 90ml
+Packaging & Disposables,Big Toothpick,P&D-0145,,500,350,0,pack,5,10,Big Toothpick
+Packaging & Disposables,Small Toothpick,P&D-0146,,300,200,0,pack,9,10,Small Toothpick
+Biscuits & Snacks,Sesamix Biscuit,B&S-0147,,3500,3200,0,pack,0,10,Sesamix Biscuit
+Biscuits & Snacks,Soda Crackers,B&S-0148,,4500,4200,0,pack,0,10,Soda Crackers
+Biscuits & Snacks,Small Soda Crackers,B&S-0153,,3500,3200,0,pack,0,10,Small Soda Crackers
+Packaging & Disposables,Big Packing Bag,P&D-0149,,300,200,0,pack,17,10,Big Packing Bag
+Packaging & Disposables,Small Packing Bag,P&D-0150,,500,350,0,pack,1,10,Small Packing Bag
+General Merchandise,Small Frutta,GM-0151,,3000,2600,0,pack,0,10,Small Frutta
+Biscuits & Snacks,Fab Biscuit,B&S-0152,,10500,9800,0,pack,0,10,Fab Biscuit
+Biscuits & Snacks,Fab Biscuit Retail,B&S-0154,,5500,4900,0,pack,0,10,Fab Biscuit Retail
+Water,Eva Water 75cl,W-0153,,2600,2400,0,pack,2,10,Eva Water 75cl
+Biscuits & Snacks,Mentos Fresh Sweet,B&S-0155,,600,500,0,pack,1,10,Mentos Fresh Sweet
+Biscuits & Snacks,Mentos Strawberry/Orange,B&S-0156,,900,800,0,pack,0,10,Mentos Strawberry/Orange
+Juices & Fruit Drinks,Small 5 Alive X6,J&FD-0051,,2750,2500,0,pack,3,10,Small 5 Alive X6
+Dairy & Milk Drinks,Viju Milk X12 Bb Star,D&MD-0052,,5000,4900,0,pack,1,10,Viju Milk X12 Bb Star
+Soft Drinks,Can Coke X6,SD-0057,,11500,10800,0,pack,1,10,Can Coke X6
+Soft Drinks,Can Coke X12,SD-0058,,11500,10800,0,pack,1,10,Can Coke X12
+Juices & Fruit Drinks,Chivita Active 1litre Retail,J&FD-0089,,1600,1500,0,pack,2,10,Chivita Active 1litre Retail
+Dairy & Milk Drinks,Hollandia Milk 1litre Retail,D&MD-097,,1700,1600,0,pack,9,10,Hollandia Milk 1litre Retail
+Packaging & Disposables,Color Spoon,P&D-0107,,600,500,0,pack,34,10,Color Spoon

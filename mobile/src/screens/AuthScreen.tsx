@@ -333,7 +333,7 @@ export default function AuthScreen() {
                         error?.message?.toLowerCase() === 'network error';
       let msg: string;
       if (isNetwork) {
-        msg = `Cannot reach the server.\n\nURL tried: ${API_BASE_URL}\n\nAndroid tip: use your machine's LAN IP, not "localhost"`;
+        msg = 'Check your internet connection and try again.\n\nPlease check:\n\u2022 Mobile data or Wi-Fi is connected and stable.\n\u2022 You have enough data balance.';
       } else {
         msg = error?.response?.data?.details ||
               error?.response?.data?.message ||
@@ -341,7 +341,7 @@ export default function AuthScreen() {
               error?.message ||
               'Login failed. Please try again.';
       }
-      Alert.alert('Login Error', msg);
+      Alert.alert(isNetwork ? 'Network Connection Failed' : 'Login Error', msg);
       setLoading(false);
     }
   };

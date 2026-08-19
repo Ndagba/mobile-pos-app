@@ -11,9 +11,10 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  TextInput,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSelector } from 'react-redux';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ApiClient from '../services/ApiClient';
@@ -64,8 +65,16 @@ interface StaffPerf {
   avg_transaction: number;
 }
 
-type Period = 'today' | 'week' | 'month';
-type TabKey = 'overview' | 'products' | 'staff' | 'stock';
+interface DiscountData {
+  user_id: string;
+  cashier_name: string;
+  discount_count: number;
+  total_discount: number;
+  associated_revenue: number;
+}
+
+type Period = 'today' | 'week' | 'month' | 'custom';
+type TabKey = 'overview' | 'products' | 'staff' | 'stock' | 'discounts';
 type ReportType = 'revenue' | 'transactions' | 'items' | 'avg_sale';
 type SortKey = 'revenue' | 'units' | 'profit';
 
@@ -74,13 +83,16 @@ const PERIOD_LABELS: Record<Period, string> = {
   today: 'Today',
   week: 'This week',
   month: 'This month',
+  custom: 'Custom',
 };
 
 const PERIOD_API_MAP: Record<Period, string> = {
   today: 'daily',
   week: 'weekly',
   month: 'monthly',
+  custom: 'custom',
 };
+
 
 const METHOD_LABELS: Record<string, string> = {
   cash: 'Cash',
@@ -112,7 +124,7 @@ const formatCurrency = (amount: number | null | undefined): string => {
   return `₦${n.toFixed(2)}`;
 };
 
-const getPeriodDates = (period: Period) => {
+const getPeriodDates = (period: Period, customFrom?: string, customTo?: string) => {
   const to = new Date();
   to.setHours(23, 59, 59, 999);
 
@@ -129,12 +141,23 @@ const getPeriodDates = (period: Period) => {
       from.setDate(1);
       from.setHours(0, 0, 0, 0);
       break;
+    case 'custom':
+      if (customFrom && customTo) {
+        try {
+          const f = new Date(customFrom);
+          f.setHours(0, 0, 0, 0);
+          const t = new Date(customTo);
+          t.setHours(23, 59, 59, 999);
+          return { dateFrom: f.toISOString(), dateTo: t.toISOString() };
+        } catch {}
+      }
+      break;
   }
 
   return { dateFrom: from.toISOString(), dateTo: to.toISOString() };
 };
 
-const getPeriodSubtitle = (period: Period): string => {
+const getPeriodSubtitle = (period: Period, customFrom?: string, customTo?: string): string => {
   const now = new Date();
   switch (period) {
     case 'today':
@@ -146,8 +169,23 @@ const getPeriodSubtitle = (period: Period): string => {
     }
     case 'month':
       return now.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    case 'custom':
+      if (customFrom && customTo) {
+        const formatCustomDate = (dStr: string) => {
+          const d = new Date(dStr + 'T12:00:00');
+          if (isNaN(d.getTime())) return dStr;
+          return d.toLocaleDateString('en-US', {
+            month: 'long',
+            day: '2-digit',
+            year: 'numeric',
+          });
+        };
+        return `${formatCustomDate(customFrom)} to ${formatCustomDate(customTo)}`;
+      }
+      return 'Custom Range';
   }
 };
+
 
 const getDayLabel = (dateStr: string, period: Period): string => {
   const d = new Date(dateStr + 'T12:00:00');
@@ -336,6 +374,7 @@ const bc = StyleSheet.create({
 // ─── Main Component ───────────────────────────────────────────
 export default function AnalyticsScreen() {
   const { width: screenWidth } = useWindowDimensions();
+  const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const user = useSelector((s: RootState) => s.auth.user);
   const { isTablet, deviceType } = useResponsive();
@@ -351,9 +390,15 @@ export default function AnalyticsScreen() {
   const [topProducts, setTopProducts] = useState<TopProduct[]>([]);
   const [paymentsData, setPaymentsData] = useState<PaymentMethod[]>([]);
   const [staffData, setStaffData] = useState<StaffPerf[]>([]);
+  const [discountsData, setDiscountsData] = useState<DiscountData[]>([]);
   const [outstanding, setOutstanding] = useState<{ total: number; count: number }>({ total: 0, count: 0 });
+  const [supplierOutstanding, setSupplierOutstanding] = useState<{ total: number; count: number }>({ total: 0, count: 0 });
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [showDateRange, setShowDateRange] = useState(false);
   const [sortBy, setSortBy] = useState<SortKey>('revenue');
   const [reportModal, setReportModal] = useState<ReportType | null>(null);
+
 
   // Branch filtering
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -396,7 +441,24 @@ export default function AnalyticsScreen() {
     loadData(period, branchId);
   };
 
+  const handlePeriodChange = (p: Period) => {
+    if (p === 'custom') {
+      setShowDateRange(true);
+      setPeriod('custom');
+    } else {
+      setShowDateRange(false);
+      setPeriod(p);
+      loadData(p, selectedBranchRef.current);
+    }
+  };
+
+
+
   const loadData = async (p: Period, branchId: string | null = null) => {
+    if (p === 'custom' && (!customFrom || !customTo)) {
+      return; // Do not fetch until range is defined
+    }
+
     // Stamp this request; any response with an older stamp is discarded
     const myReq = ++reqId.current;
     setError(null);
@@ -410,13 +472,15 @@ export default function AnalyticsScreen() {
       if (cached.paymentsData) setPaymentsData(cached.paymentsData);
       if (cached.staffData) setStaffData(cached.staffData);
       if (cached.allProducts) setAllProducts(cached.allProducts);
+      if (cached.discountsData) setDiscountsData(cached.discountsData);
       if (cached.outstanding) setOutstanding(cached.outstanding);
+      if (cached.supplierOutstanding) setSupplierOutstanding(cached.supplierOutstanding);
       setLoading(false);
     } else {
       setLoading(true);
     }
 
-    const { dateFrom, dateTo } = getPeriodDates(p);
+    const { dateFrom, dateTo } = getPeriodDates(p, customFrom, customTo);
     const bp = branchId ? `&branch_id=${encodeURIComponent(branchId)}` : '';
 
     const requests: Promise<any>[] = [
@@ -435,21 +499,28 @@ export default function AnalyticsScreen() {
       );
       // Products list for stock verification tab
       requests.push(ApiClient.get(`/products?limit=500${bp}`));
+      requests.push(
+        ApiClient.get(
+          `/analytics/discounts?dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}${bp}`
+        )
+      );
     }
 
     // Outstanding total always last so the conditional positions above stay stable.
     const outstandingIdx = requests.length;
     requests.push(ApiClient.get('/analytics/outstanding'));
 
+    const supplierSummaryIdx = requests.length;
+    requests.push(ApiClient.get('/suppliers/summary'));
+
     const results = await Promise.allSettled(requests);
 
     // Drop this response if a newer request has already been dispatched
     if (myReq !== reqId.current) return;
 
-    // canManageStaff: indices [0]=sales [1]=topProducts [2]=payments [3]=staff [4]=allProducts [5]=outstanding
-    // non-manager:   indices [0]=sales [1]=topProducts [2]=payments [3]=outstanding
     const [sales, topProductsResult, payments, staffResult, allProdsResult] = results;
     const outstandingResult = results[outstandingIdx];
+    const supplierResult = results[supplierSummaryIdx];
 
     if (sales.status === 'fulfilled') {
       setSalesData(Array.isArray(sales.value) ? (sales.value as SaleDay[]) : []);
@@ -469,12 +540,37 @@ export default function AnalyticsScreen() {
       const p = allProdsResult.value;
       setAllProducts(Array.isArray(p) ? p : []);
     }
+    
+    if (canManageStaff) {
+      // The discounts request is the 3rd one pushed inside canManageStaff
+      const discountsIdx = 5; // sales, topProducts, payments, staff, products, discounts
+      if (results[discountsIdx] && results[discountsIdx].status === 'fulfilled') {
+        const dResult: any = results[discountsIdx];
+        setDiscountsData(Array.isArray(dResult.value?.data) ? dResult.value.data : (Array.isArray(dResult.value) ? dResult.value : []));
+      }
+    }
+
     if (outstandingResult && outstandingResult.status === 'fulfilled') {
       const o: any = outstandingResult.value;
       setOutstanding({
         total: Number(o?.total_outstanding ?? 0),
         count: Number(o?.customers_with_balance ?? 0),
       });
+    }
+
+    let totalOwing = 0;
+    let owingCount = 0;
+    if (supplierResult && supplierResult.status === 'fulfilled') {
+      const data: any = supplierResult.value;
+      const list = Array.isArray(data) ? data : data?.data ?? [];
+      list.forEach((item: any) => {
+        const owing = Math.max(0, (item.total_invoiced || 0) - (item.total_paid || 0));
+        if (owing > 0) {
+          totalOwing += owing;
+          owingCount++;
+        }
+      });
+      setSupplierOutstanding({ total: totalOwing, count: owingCount });
     }
 
     if (
@@ -499,12 +595,20 @@ export default function AnalyticsScreen() {
         count: Number(o?.customers_with_balance ?? 0),
       };
     }
+    if (canManageStaff && discountsData) {
+      bundle.discountsData = discountsData;
+    }
+    if (supplierResult && supplierResult.status === 'fulfilled') {
+      bundle.supplierOutstanding = { total: totalOwing, count: owingCount };
+    }
+
     if (Object.keys(bundle).length > 0) {
       DatabaseService.setApiCache(cacheKey, bundle);
     }
 
     setLoading(false);
   };
+
 
   // ── Derived stats ─────────────────────────────────────────────
   const totalRevenue = salesData.reduce((s, d) => s + d.revenue, 0);
@@ -563,13 +667,31 @@ export default function AnalyticsScreen() {
       : 1;
 
   // ── Report definitions ────────────────────────────────────────
-  const fmtDate = (dateStr: string) =>
-    new Date(dateStr + 'T12:00:00').toLocaleDateString(undefined, {
+  const fmtDate = (dateStr: string) => {
+    if (!dateStr) return '—';
+    const cleanStr = dateStr.includes('T') ? dateStr : `${dateStr}T12:00:00`;
+    const d = new Date(cleanStr);
+    if (isNaN(d.getTime())) {
+      const dFallback = new Date(dateStr);
+      if (isNaN(dFallback.getTime())) return dateStr;
+      return dFallback.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+    return d.toLocaleDateString(undefined, {
       month: 'short',
       day: 'numeric',
     });
+  };
 
   const sortedSalesData = [...salesData].sort((a, b) => a.date.localeCompare(b.date));
+  const getPaymentMethodSum = (method: string) => {
+    return paymentsData
+      .filter(p => {
+        const m = (p.payment_method || '').toLowerCase();
+        if (method === 'Transfer') return m === 'transfer' || m === 'mobile_wallet';
+        return m === method.toLowerCase();
+      })
+      .reduce((sum, p) => sum + (Number(p._sum?.total_amount) || 0), 0);
+  };
 
   type ReportDef = {
     title: string;
@@ -585,15 +707,23 @@ export default function AnalyticsScreen() {
       title: 'Revenue Report',
       icon: 'cash',
       color: C.green,
-      headers: ['Date', 'Revenue (₦)', 'Transactions', 'Items'],
+      headers: ['Date', 'Revenue (₦)', 'Profit (₦)', 'Transactions', 'Items'],
       getRow: (d) => [
         fmtDate(d.date),
         d.revenue.toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        (d.profit ?? 0).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
         String(d.transactions),
         String(d.items_sold),
       ],
       summary: [
         { label: 'Total Revenue', value: formatCurrency(totalRevenue) },
+        { label: 'Total Profit', value: formatCurrency(totalProfit) },
+        { label: 'Total Payables', value: formatCurrency(supplierOutstanding.total) },
+        { label: 'Total Recievable', value: formatCurrency(outstanding.total) },
+        { label: 'Net Profit', value: formatCurrency(totalProfit - supplierOutstanding.total) },
+        { label: 'Cash Payments', value: formatCurrency(getPaymentMethodSum('Cash')) },
+        { label: 'Card Payments', value: formatCurrency(getPaymentMethodSum('Card')) },
+        { label: 'Transfer Payments', value: formatCurrency(getPaymentMethodSum('Transfer')) },
         { label: 'Transactions', value: String(totalTransactions) },
         { label: 'Items Sold', value: String(totalItems) },
       ],
@@ -661,10 +791,12 @@ export default function AnalyticsScreen() {
   const handleDownloadCSV = async () => {
     if (!reportModal) return;
     const def = reportDefs[reportModal];
+    const branchName = selectedBranchId ? (branches.find(b => b.id === selectedBranchId)?.name ?? 'Branch') : 'All Branches';
 
     const lines: string[] = [
       `# ${def.title}`,
-      `# Period: ${getPeriodSubtitle(period)}`,
+      `# Branch: ${branchName}`,
+      `# Period: ${getPeriodSubtitle(period, customFrom, customTo)}`,
       `# Generated: ${new Date().toLocaleString()}`,
       '',
       def.headers.map((h) => `"${h}"`).join(','),
@@ -688,9 +820,11 @@ export default function AnalyticsScreen() {
 
   // ── Stock verification CSV download ──────────────────────────
   const handleDownloadStockVerify = async () => {
+    const branchName = selectedBranchId ? (branches.find(b => b.id === selectedBranchId)?.name ?? 'Branch') : 'All Branches';
     const lines = [
       '# Stock Verification Report',
-      `# Period: ${getPeriodSubtitle(period)}`,
+      `# Branch: ${branchName}`,
+      `# Period: ${getPeriodSubtitle(period, customFrom, customTo)}`,
       `# Generated: ${new Date().toLocaleString()}`,
       '',
       '"Product Name","SKU","Category","Stock On Hand","Units Sold","Revenue (N)"',
@@ -724,6 +858,7 @@ export default function AnalyticsScreen() {
       ? [
           { key: 'staff' as TabKey, label: 'Staff', icon: 'account-group-outline' },
           { key: 'stock' as TabKey, label: 'Stock', icon: 'clipboard-check-outline' },
+          { key: 'discounts' as TabKey, label: 'Discounts', icon: 'tag-multiple-outline' },
         ]
       : []),
   ];
@@ -739,26 +874,35 @@ export default function AnalyticsScreen() {
         <View style={s.header}>
           <View style={{ flex: 1 }}>
             <Text style={[s.headerEyebrow, { fontSize: fontSize.xs }]}>
-              Analytics · {getPeriodSubtitle(period)}
+              Analytics · {getPeriodSubtitle(period, customFrom, customTo)}
             </Text>
             <Text style={[s.headerTitle, { fontSize: isTablet ? 32 : 26 }]}>Performance</Text>
           </View>
-          <TouchableOpacity
-            style={s.iconBtn}
-            onPress={() => reportModal === null && setReportModal('revenue')}
-            activeOpacity={0.75}
-          >
-            <MaterialCommunityIcons name="download-outline" size={20} color={C.ink} />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity
+              style={s.iconBtn}
+              onPress={() => navigation.navigate('EODReports')}
+              activeOpacity={0.75}
+            >
+              <MaterialCommunityIcons name="file-chart-outline" size={20} color={C.accent} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.iconBtn}
+              onPress={() => reportModal === null && setReportModal('revenue')}
+              activeOpacity={0.75}
+            >
+              <MaterialCommunityIcons name="download-outline" size={20} color={C.ink} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* ── Period segmented control ── */}
         <View style={s.periodContainer}>
-          {(['today', 'week', 'month'] as Period[]).map((p) => (
+          {(['today', 'week', 'month', 'custom'] as Period[]).map((p) => (
             <TouchableOpacity
               key={p}
               style={[s.periodBtn, period === p && s.periodBtnActive]}
-              onPress={() => setPeriod(p)}
+              onPress={() => handlePeriodChange(p)}
               activeOpacity={0.8}
             >
               <Text style={[s.periodBtnText, period === p && s.periodBtnTextActive]}>
@@ -768,8 +912,50 @@ export default function AnalyticsScreen() {
           ))}
         </View>
 
+        {/* ── Custom Date Range Panel ── */}
+        {showDateRange && period === 'custom' && (
+          <View style={s.dateRangePanel}>
+            <View style={s.dateRangeRow}>
+              <MaterialCommunityIcons name="calendar-start" size={14} color={C.muted} />
+              <TextInput
+                style={s.dateInput}
+                placeholder="YYYY-MM-DD"
+                value={customFrom}
+                onChangeText={setCustomFrom}
+                keyboardType="numeric"
+                maxLength={10}
+              />
+            </View>
+            <View style={s.dateRangeSep} />
+            <View style={s.dateRangeRow}>
+              <MaterialCommunityIcons name="calendar-end" size={14} color={C.muted} />
+              <TextInput
+                style={s.dateInput}
+                placeholder="YYYY-MM-DD"
+                value={customTo}
+                onChangeText={setCustomTo}
+                keyboardType="numeric"
+                maxLength={10}
+              />
+            </View>
+            <TouchableOpacity
+              style={[s.dateApplyBtn, (!customFrom || !customTo) && { opacity: 0.4 }]}
+              onPress={() => {
+                if (!customFrom || !customTo) return;
+                loadData('custom', selectedBranchRef.current);
+                setShowDateRange(false);
+              }}
+              activeOpacity={0.85}
+            >
+              <MaterialCommunityIcons name="check" size={14} color="#fff" />
+              <Text style={s.dateApplyText}>Apply Range</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+
         {/* ── Branch filter chips (visible when branches exist) ── */}
-        {branches.length > 0 && (
+        {branches.length > 1 && (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -1065,7 +1251,7 @@ export default function AnalyticsScreen() {
                       />
                     </View>
                     <View>
-                      <Text style={s.profitLabel}>Total Outstanding</Text>
+                      <Text style={s.profitLabel}>Total Recievable</Text>
                       <Text style={[s.profitValue, MONO]}>
                         {formatCurrency(outstanding.total)}
                       </Text>
@@ -1092,6 +1278,51 @@ export default function AnalyticsScreen() {
                     </Text>
                   </View>
                 </View>
+
+                {/* Supplier Outstanding card — credit owed to suppliers */}
+                <View style={[s.profitCard, { marginTop: 10 }]}>
+                  <View style={s.profitLeft}>
+                    <View
+                      style={[
+                        s.profitIconBox,
+                        { backgroundColor: C.rose + '1A' },
+                      ]}
+                    >
+                      <MaterialCommunityIcons
+                        name="truck-delivery-outline"
+                        size={18}
+                        color={C.rose}
+                      />
+                    </View>
+                    <View>
+                      <Text style={s.profitLabel}>Total Payables</Text>
+                      <Text style={[s.profitValue, MONO]}>
+                        {formatCurrency(supplierOutstanding.total)}
+                      </Text>
+                    </View>
+                  </View>
+                  <View
+                    style={[
+                      s.marginBadge,
+                      { backgroundColor: supplierOutstanding.count > 0 ? C.roseBg : C.greenBg },
+                    ]}
+                  >
+                    <MaterialCommunityIcons
+                      name="truck-outline"
+                      size={13}
+                      color={supplierOutstanding.count > 0 ? C.rose : C.green}
+                    />
+                    <Text
+                      style={[
+                        s.marginBadgeText,
+                        { color: supplierOutstanding.count > 0 ? C.rose : C.green },
+                      ]}
+                    >
+                      {supplierOutstanding.count} {supplierOutstanding.count === 1 ? 'supplier' : 'suppliers'}
+                    </Text>
+                  </View>
+                </View>
+
 
                 {/* Payment methods */}
                 <View style={s.card}>
@@ -1426,6 +1657,74 @@ export default function AnalyticsScreen() {
                 )}
               </View>
             )}
+
+            {/* ══════════════════════════════════════════════════
+                DISCOUNTS TAB
+            ══════════════════════════════════════════════════ */}
+            {activeTab === 'discounts' && canManageStaff && (
+              <View style={s.card}>
+                <View style={s.cardHeader}>
+                  <View style={[s.cardIconBox, { backgroundColor: C.roseBg }]}>
+                    <MaterialCommunityIcons
+                      name="tag-multiple-outline"
+                      size={15}
+                      color={C.rose}
+                    />
+                  </View>
+                  <Text style={s.cardTitle}>Cashier Discounts</Text>
+                </View>
+
+                {discountsData.length === 0 ? (
+                  <View style={s.emptyState}>
+                    <MaterialCommunityIcons
+                      name="tag-off-outline"
+                      size={44}
+                      color={C.border}
+                    />
+                    <Text style={s.emptyText}>No discount data for this period</Text>
+                  </View>
+                ) : (
+                  discountsData.map((dItem, i) => {
+                    const initial = dItem.cashier_name.charAt(0).toUpperCase();
+
+                    return (
+                      <View
+                        key={dItem.user_id}
+                        style={[
+                          s.staffRow,
+                          i === discountsData.length - 1 && { borderBottomWidth: 0 },
+                        ]}
+                      >
+                        {/* Letter avatar */}
+                        <View style={[s.staffAvatar, { backgroundColor: C.roseBg }]}>
+                          <Text style={[s.staffAvatarText, { color: C.rose }]}>{initial}</Text>
+                        </View>
+
+                        {/* Info */}
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={s.staffName} numberOfLines={1}>
+                            {dItem.cashier_name}
+                          </Text>
+                          <Text style={s.staffMeta}>
+                            {dItem.discount_count} discounted {dItem.discount_count === 1 ? 'txn' : 'txns'}
+                          </Text>
+                        </View>
+
+                        {/* Totals */}
+                        <View style={{ alignItems: 'flex-end' }}>
+                          <Text style={[s.staffRevenue, MONO, { color: C.rose }]} numberOfLines={1}>
+                            - {formatCurrency(dItem.total_discount)}
+                          </Text>
+                          <Text style={[s.productTxns, { marginTop: 2 }]}>
+                            {formatCurrency(dItem.associated_revenue)} rev
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })
+                )}
+              </View>
+            )}
           </>
         )}
       </ScrollView>
@@ -1519,7 +1818,9 @@ export default function AnalyticsScreen() {
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={m.title}>{def.title}</Text>
-                        <Text style={m.sub}>{getPeriodSubtitle(period)}</Text>
+                        <Text style={m.sub}>
+                          {selectedBranchId ? (branches.find(b => b.id === selectedBranchId)?.name ?? 'Branch') : 'All Branches'} · {getPeriodSubtitle(period, customFrom, customTo)}
+                        </Text>
                       </View>
                       <TouchableOpacity
                         onPress={() => setReportModal(null)}
@@ -1740,6 +2041,42 @@ const s = StyleSheet.create({
   periodBtnTextActive: {
     color: C.bg,
   },
+
+  dateRangePanel: {
+    marginBottom: 16,
+    backgroundColor: C.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  dateRangeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+  },
+  dateRangeSep: { height: 1, backgroundColor: C.border },
+  dateInput: {
+    flex: 1,
+    fontSize: 13,
+    color: C.ink,
+    fontWeight: '600',
+    padding: 0,
+  },
+  dateApplyBtn: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: C.accent,
+    borderRadius: 10,
+    paddingVertical: 10,
+  },
+  dateApplyText: { fontSize: 13, fontWeight: '700', color: '#fff' },
+
 
   // ── Branch chips ─────────────────────────────────────────────
   branchScrollContent: {
@@ -2352,15 +2689,16 @@ const m = StyleSheet.create({
   },
   summaryRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     marginBottom: 18,
   },
   summaryChip: {
-    flex: 1,
+    width: '48.5%',
     borderRadius: 10,
     borderWidth: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
     alignItems: 'center',
     backgroundColor: C.bg,
   },

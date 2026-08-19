@@ -1,18 +1,32 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.InventoryService = void 0;
-const client_1 = require("@prisma/client");
+const prisma_1 = require("../lib/prisma");
 const uuid_1 = require("uuid");
 const errorHandler_1 = require("../utils/errorHandler");
 const logger_1 = require("../utils/logger");
-const prisma = new client_1.PrismaClient();
+const redis_1 = require("../lib/redis");
 class InventoryService {
-    static async getInventoryStatus(storeId) {
+    static async getInventoryStatus(storeId, cursor, limit = 30) {
         try {
-            const inventory = await prisma.inventory.findMany({
+            const cacheable = !cursor && !!storeId;
+            const cacheKey = `inventory:${storeId}:first:${limit}`;
+            if (cacheable) {
+                const cached = await redis_1.redis.get(cacheKey);
+                if (cached) {
+                    logger_1.logger.info({ event: 'inventory_cache_hit', cacheKey });
+                    return JSON.parse(cached);
+                }
+                logger_1.logger.info({ event: 'inventory_cache_miss', cacheKey });
+            }
+            const inventory = await prisma_1.prisma.inventory.findMany({
                 where: storeId
                     ? { product: { branch: { store_id: storeId } } }
                     : {},
+                take: limit,
+                skip: cursor ? 1 : 0,
+                ...(cursor && { cursor: { product_id: cursor } }),
+                orderBy: { product_id: 'asc' },
                 include: {
                     product: {
                         select: {
@@ -25,7 +39,10 @@ class InventoryService {
                     }
                 }
             });
-            return inventory.map((inv) => ({
+            const nextCursor = inventory.length === limit
+                ? inventory[inventory.length - 1].product_id
+                : null;
+            const items = inventory.map((inv) => ({
                 product_id: inv.product_id,
                 product_name: inv.product.name,
                 sku: inv.product.sku,
@@ -39,6 +56,11 @@ class InventoryService {
                         ? 'LOW'
                         : 'IN_STOCK'
             }));
+            const result = { items, nextCursor };
+            if (cacheable) {
+                await redis_1.redis.setex(cacheKey, 30, JSON.stringify(result));
+            }
+            return result;
         }
         catch (error) {
             logger_1.logger.error({
@@ -48,13 +70,33 @@ class InventoryService {
             throw new errorHandler_1.AppError(500, 'Failed to fetch inventory');
         }
     }
-    static async getLowStockAlerts(storeId, branchId) {
+    static async getStoreIdForProduct(productId) {
+        const product = await prisma_1.prisma.product.findUnique({
+            where: { id: productId },
+            select: { branch: { select: { store_id: true } } }
+        });
+        return product?.branch?.store_id ?? null;
+    }
+    static async invalidateInventoryCache(storeId) {
+        if (!storeId)
+            return;
+        try {
+            await redis_1.redis.del(`inventory:${storeId}:first:30`);
+        }
+        catch (error) {
+            logger_1.logger.error({
+                event: 'inventory_cache_invalidation_failed',
+                storeId,
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+        }
+    }
+    static async getLowStockAlerts(storeId, branchIds) {
         try {
             // Use raw SQL to compare two columns (quantity_on_hand <= low_stock_threshold)
             // Prisma ORM can't compare two fields of the same row without a raw query.
-            const lowStockItems = branchId
-                // Scoped to a specific branch (manager / cashier view)
-                ? await prisma.$queryRaw `
+            const lowStockItems = branchIds && branchIds.length > 0
+                ? await prisma_1.prisma.$queryRaw `
             SELECT
               i.product_id,
               i.quantity_on_hand,
@@ -66,13 +108,12 @@ class InventoryService {
             JOIN "Product" p ON i.product_id = p.id
             WHERE i.quantity_on_hand <= i.low_stock_threshold
               AND p.is_active = true
-              AND p.branch_id = ${branchId}
+              AND p.branch_id = ANY(${branchIds})
             ORDER BY i.quantity_on_hand ASC
             LIMIT 100
           `
                 : storeId
-                    // No branch but we have a store — scope to all branches of this store
-                    ? await prisma.$queryRaw `
+                    ? await prisma_1.prisma.$queryRaw `
             SELECT
               i.product_id,
               i.quantity_on_hand,
@@ -90,7 +131,7 @@ class InventoryService {
             LIMIT 100
           `
                     // Super-admin / no store context — return everything (platform-level view)
-                    : await prisma.$queryRaw `
+                    : await prisma_1.prisma.$queryRaw `
             SELECT
               i.product_id,
               i.quantity_on_hand,
@@ -131,7 +172,7 @@ class InventoryService {
         try {
             const expiryDate = new Date();
             expiryDate.setDate(expiryDate.getDate() + daysUntilExpiry);
-            const batches = await prisma.batchTracking.findMany({
+            const batches = await prisma_1.prisma.batchTracking.findMany({
                 where: {
                     is_expired: false,
                     expiry_date: {
@@ -175,7 +216,7 @@ class InventoryService {
     }
     static async updateStock(productId, quantity, reason) {
         try {
-            const inventory = await prisma.inventory.findUnique({
+            const inventory = await prisma_1.prisma.inventory.findUnique({
                 where: { product_id: productId }
             });
             if (!inventory) {
@@ -184,7 +225,7 @@ class InventoryService {
             if (Number(inventory.quantity_on_hand) + quantity < 0) {
                 throw new errorHandler_1.AppError(400, 'Insufficient stock for this operation');
             }
-            const updated = await prisma.inventory.update({
+            const updated = await prisma_1.prisma.inventory.update({
                 where: { product_id: productId },
                 data: {
                     quantity_on_hand: {
@@ -193,6 +234,8 @@ class InventoryService {
                     last_stock_check: new Date()
                 }
             });
+            const storeId = await this.getStoreIdForProduct(productId);
+            await this.invalidateInventoryCache(storeId);
             logger_1.logger.info({
                 event: 'inventory_updated',
                 product_id: productId,
@@ -213,16 +256,18 @@ class InventoryService {
     }
     static async updateThreshold(productId, threshold) {
         try {
-            const inventory = await prisma.inventory.findUnique({
+            const inventory = await prisma_1.prisma.inventory.findUnique({
                 where: { product_id: productId }
             });
             if (!inventory) {
                 throw new errorHandler_1.AppError(404, 'Inventory record not found');
             }
-            const updated = await prisma.inventory.update({
+            const updated = await prisma_1.prisma.inventory.update({
                 where: { product_id: productId },
                 data: { low_stock_threshold: BigInt(Math.round(threshold)) }
             });
+            const storeId = await this.getStoreIdForProduct(productId);
+            await this.invalidateInventoryCache(storeId);
             logger_1.logger.info({
                 event: 'threshold_updated',
                 product_id: productId,
@@ -244,7 +289,7 @@ class InventoryService {
             if (expiryDate <= manufacturedDate) {
                 throw new errorHandler_1.AppError(400, 'Expiry date must be after manufactured date');
             }
-            const batch = await prisma.batchTracking.create({
+            const batch = await prisma_1.prisma.batchTracking.create({
                 data: {
                     id: (0, uuid_1.v4)(),
                     product_id: productId,
@@ -257,7 +302,7 @@ class InventoryService {
                 }
             });
             // Update inventory
-            await prisma.inventory.update({
+            await prisma_1.prisma.inventory.update({
                 where: { product_id: productId },
                 data: {
                     quantity_on_hand: {
@@ -265,6 +310,8 @@ class InventoryService {
                     }
                 }
             });
+            const storeId = await this.getStoreIdForProduct(productId);
+            await this.invalidateInventoryCache(storeId);
             logger_1.logger.info({
                 event: 'batch_created',
                 batch_id: batch.id,
@@ -284,14 +331,14 @@ class InventoryService {
     }
     static async markBatchExpired(batchId) {
         try {
-            const batch = await prisma.batchTracking.findUnique({
+            const batch = await prisma_1.prisma.batchTracking.findUnique({
                 where: { id: batchId }
             });
             if (!batch) {
                 throw new errorHandler_1.AppError(404, 'Batch not found');
             }
             // Deduct from inventory
-            await prisma.inventory.update({
+            await prisma_1.prisma.inventory.update({
                 where: { product_id: batch.product_id },
                 data: {
                     quantity_on_hand: {
@@ -300,10 +347,12 @@ class InventoryService {
                 }
             });
             // Mark batch as expired
-            const updated = await prisma.batchTracking.update({
+            const updated = await prisma_1.prisma.batchTracking.update({
                 where: { id: batchId },
                 data: { is_expired: true }
             });
+            const storeId = await this.getStoreIdForProduct(batch.product_id);
+            await this.invalidateInventoryCache(storeId);
             logger_1.logger.info({
                 event: 'batch_marked_expired',
                 batch_id: batchId,
@@ -323,7 +372,7 @@ class InventoryService {
     static async getInventoryTurnover(storeId, dateFrom, dateTo) {
         try {
             // Tables use quoted PascalCase names as created by Prisma migrations.
-            const result = await prisma.$queryRaw `
+            const result = await prisma_1.prisma.$queryRaw `
         SELECT
           p.id,
           p.name,

@@ -2,23 +2,25 @@ import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, Alert, ScrollView, Modal,
   TouchableOpacity, KeyboardAvoidingView, Platform,
-  TextInput as RNTextInput, useWindowDimensions,
+  TextInput as RNTextInput, useWindowDimensions, Image,
 } from 'react-native';
 import {
   Button, TextInput, Portal, Dialog, Divider,
   ActivityIndicator, IconButton, Surface, HelperText,
 } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState } from '../redux/store';
 import { setLowStockAlerts } from '../redux/slices/inventorySlice';
-import ApiClient from '../services/ApiClient';
+import ApiClient, { API_BASE_URL } from '../services/ApiClient';
 import BarcodeScannerModal from '../components/BarcodeScannerModal';
+import ProductMovementSheet from '../components/inventory/ProductMovementSheet';
 import { C, R, S, naira } from '../theme';
 import { useResponsive, responsiveSpacing, responsiveFontSize, responsiveGridColumns, responsiveMinTouchTarget } from '../utils/responsiveDesign';
+import * as ImagePicker from 'expo-image-picker';
 
 // ─── Types ────────────────────────────────────────────────────
 type TabKey = 'products' | 'categories' | 'low-stock';
@@ -31,6 +33,7 @@ interface Product {
   tax_rate: number; category_id?: string; category?: Category;
   description?: string; branch_id?: string; unit?: string;
   inventory?: { quantity_on_hand: number; low_stock_threshold: number };
+  image_url?: string | null;
 }
 
 const UNIT_OPTIONS = ['piece', 'kg', 'g', 'liter', 'ml', 'pack', 'carton', 'bottle'] as const;
@@ -76,7 +79,7 @@ const EMPTY_PRODUCT = {
   name: '', sku: '', barcode: '', marked_price: '', effective_price: '',
   cost_price: '', tax_rate: '7.5', category_id: '',
   quantity: '', description: '', low_stock_threshold: '10',
-  branch_id: '', unit: 'piece',
+  branch_id: '', unit: 'piece', image_url: '',
 };
 const EMPTY_CATEGORY = { name: '', description: '', branch_id: '' };
 
@@ -135,6 +138,7 @@ function CategoryDropdown({
 // ─── Main Screen ──────────────────────────────────────────────
 export default function InventoryScreen() {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<any>();
   const dispatch = useDispatch();
   const inventory = useSelector((state: RootState) => state.inventory);
   const user = useSelector((state: RootState) => state.auth.user);
@@ -182,16 +186,65 @@ export default function InventoryScreen() {
   const [stockReason, setStockReason] = useState('restock');
   const [stockThreshold, setStockThreshold] = useState('');
 
+  // Ledger Sheet
+  const [showLedger, setShowLedger] = useState(false);
+  const [ledgerProduct, setLedgerProduct] = useState<Product | null>(null);
+
   // Forms
   const [productForm, setProductForm] = useState(EMPTY_PRODUCT);
   const [categoryForm, setCategoryForm] = useState(EMPTY_CATEGORY);
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  const pickImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'We need media library permissions to upload product images.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+        base64: true,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        if (!asset.base64) {
+          Alert.alert('Error', 'Could not read image data.');
+          return;
+        }
+
+        setUploadingImage(true);
+        const base64Str = `data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}`;
+
+        const res: any = await ApiClient.post('/products/upload-image', {
+          image: base64Str,
+        });
+
+        const imageUrl = res?.imageUrl || res?.data?.imageUrl;
+        if (imageUrl) {
+          setProductForm(f => ({ ...f, image_url: imageUrl }));
+        } else {
+          throw new Error('Upload response did not return an image URL');
+        }
+      }
+    } catch (e: any) {
+      Alert.alert('Upload Failed', e?.message || 'Failed to upload image. Please try again.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
 
   // ── Load on screen focus ──────────────────────────────────
   useFocusEffect(useCallback(() => {
     const init = async () => {
       setLoading(true);
-      if (isAdmin) await loadBranches();
+      await loadBranches();
       await Promise.all([
         loadProducts(selectedBranchRef.current),
         loadCategories(selectedBranchRef.current),
@@ -207,13 +260,18 @@ export default function InventoryScreen() {
     try {
       const res: any = await ApiClient.get('/branches');
       const list: Branch[] = Array.isArray(res) ? res : res?.data ?? [];
-      setBranches(list.filter((b: Branch) => b.is_active));
+      const activeBranches = list.filter((b: Branch) => b.is_active);
+      setBranches(activeBranches);
+      if (activeBranches.length === 1) {
+        selectedBranchRef.current = activeBranches[0].id;
+        setSelectedBranchId(activeBranches[0].id);
+      }
     } catch {}
   };
 
   const loadProducts = async (branchId?: string | null) => {
     try {
-      const branchParam = isAdmin && branchId
+      const branchParam = branchId
         ? `&branch_id=${encodeURIComponent(branchId)}` : '';
       const res: any = await ApiClient.get(`/products?limit=500${branchParam}`);
       setProducts(Array.isArray(res) ? res : res?.data ?? []);
@@ -222,7 +280,7 @@ export default function InventoryScreen() {
 
   const loadCategories = async (branchId?: string | null) => {
     try {
-      const branchParam = isAdmin && branchId
+      const branchParam = branchId
         ? `?branch_id=${encodeURIComponent(branchId)}` : '';
       const res: any = await ApiClient.get(`/categories${branchParam}`);
       setCategories(Array.isArray(res) ? res : res?.data ?? []);
@@ -231,7 +289,7 @@ export default function InventoryScreen() {
 
   const loadLowStock = async (branchId?: string | null) => {
     try {
-      const branchParam = isAdmin && branchId
+      const branchParam = branchId
         ? `?branch_id=${encodeURIComponent(branchId)}` : '';
       const res: any = await ApiClient.get(`/inventory/low-stock${branchParam}`);
       dispatch(setLowStockAlerts(Array.isArray(res) ? res : res?.data ?? []));
@@ -266,7 +324,8 @@ export default function InventoryScreen() {
   // ─── Category CRUD ────────────────────────────────────────
   const openNewCategory = () => {
     setEditingCategory(null);
-    setCategoryForm({ ...EMPTY_CATEGORY, branch_id: selectedBranchRef.current ?? '' });
+    const defaultBranchId = selectedBranchRef.current || (branches.length === 1 ? branches[0].id : '');
+    setCategoryForm({ ...EMPTY_CATEGORY, branch_id: defaultBranchId });
     setShowCategoryForm(true);
   };
 
@@ -282,7 +341,11 @@ export default function InventoryScreen() {
 
   const handleSaveCategory = async () => {
     if (!categoryForm.name.trim()) { Alert.alert('Validation', 'Name is required'); return; }
-    if (!editingCategory && isAdmin && !categoryForm.branch_id) {
+    let finalBranchId = categoryForm.branch_id;
+    if (!finalBranchId && branches.length === 1) {
+      finalBranchId = branches[0].id;
+    }
+    if (!editingCategory && isAdmin && !finalBranchId) {
       Alert.alert(
         'Branch Required',
         'Select a specific branch using the filter chips above, then try creating a category again.'
@@ -301,7 +364,7 @@ export default function InventoryScreen() {
         await ApiClient.post('/categories', {
           name: categoryForm.name.trim(),
           description: categoryForm.description.trim() || undefined,
-          ...(categoryForm.branch_id && { branch_id: categoryForm.branch_id }),
+          ...(finalBranchId && { branch_id: finalBranchId }),
         });
         Alert.alert('Created', `"${categoryForm.name}" created`);
       }
@@ -352,11 +415,12 @@ export default function InventoryScreen() {
       if (raw) draft = JSON.parse(raw);
     } catch {}
 
+    const defaultBranchId = selectedBranchRef.current || (branches.length === 1 ? branches[0].id : '') || draft?.branch_id || '';
     setProductForm({
       ...EMPTY_PRODUCT,
       low_stock_threshold: storedThreshold ?? '10',
       ...(draft ?? {}),
-      branch_id: selectedBranchRef.current ?? draft?.branch_id ?? '',
+      branch_id: defaultBranchId,
     });
     setShowProductForm(true);
   };
@@ -405,17 +469,23 @@ export default function InventoryScreen() {
       low_stock_threshold: String(p.inventory?.low_stock_threshold ?? 10),
       branch_id: p.branch_id ?? '',
       unit: p.unit ?? 'piece',
+      image_url: p.image_url ?? '',
     });
     setShowProductForm(true);
   };
 
   const handleSaveProduct = async () => {
+    let finalBranchId = productForm.branch_id;
+    if (!finalBranchId && branches.length === 1) {
+      finalBranchId = branches[0].id;
+    }
+
     const errs: string[] = [];
     if (!productForm.name.trim()) errs.push('Name is required');
     if (!productForm.sku.trim()) errs.push('SKU is required');
     if (!productForm.marked_price || isNaN(+productForm.marked_price)) errs.push('Valid selling price required');
     if (!editingProduct && !productForm.category_id) errs.push('Category is required');
-    if (!editingProduct && isAdmin && !productForm.branch_id) {
+    if (!editingProduct && isAdmin && !finalBranchId) {
       errs.push('Branch is required — select a branch from the filter chips above');
     }
     if (errs.length) { Alert.alert('Validation', errs.join('\n')); return; }
@@ -437,6 +507,7 @@ export default function InventoryScreen() {
         category_id: productForm.category_id || undefined,
         description: productForm.description.trim() || undefined,
         unit: productForm.unit || 'piece',
+        image_url: productForm.image_url || null,
       };
 
       if (editingProduct) {
@@ -451,7 +522,7 @@ export default function InventoryScreen() {
       } else {
         payload.initial_quantity = parseInt(productForm.quantity || '0', 10);
         payload.low_stock_threshold = Math.max(1, parseInt(productForm.low_stock_threshold || '10', 10));
-        if (productForm.branch_id) payload.branch_id = productForm.branch_id;
+        if (finalBranchId) payload.branch_id = finalBranchId;
         await ApiClient.post('/products', payload);
         // Product saved for real — discard any lingering draft.
         try { await AsyncStorage.removeItem(PRODUCT_DRAFT_KEY); } catch {}
@@ -506,6 +577,14 @@ export default function InventoryScreen() {
       Alert.alert('Validation', 'Reason is required when adjusting stock');
       return;
     }
+    if (hasStockChange) {
+      const delta = parseInt(stockDelta, 10);
+      const current = stockProduct?.inventory ? Number(stockProduct.inventory.quantity_on_hand) : 0;
+      if (current + delta < 0) {
+        Alert.alert('Validation', `Final stock cannot be negative. Current stock is ${current}, adjustment would make it ${current + delta}.`);
+        return;
+      }
+    }
 
     setSaving(true);
     try {
@@ -537,7 +616,7 @@ export default function InventoryScreen() {
   // ─── FAB press ────────────────────────────────────────────
   const handleFabPress = () => {
     if (activeTab === 'low-stock') { loadAll(); return; }
-    if (isAdmin && !selectedBranchRef.current) {
+    if (branches.length > 1 && !selectedBranchRef.current) {
       Alert.alert(
         'Select a Branch First',
         `Choose a specific branch from the filter bar above, then tap the button again to create a new ${activeTab === 'categories' ? 'category' : 'product'}.`
@@ -582,11 +661,11 @@ export default function InventoryScreen() {
     return sum + Number(p.inventory?.quantity_on_hand ?? 0) * Number(p.effective_price);
   }, 0);
 
-  const stockValueLabel = isAdmin
+  const stockValueLabel = branches.length > 1
     ? selectedBranchId === null
-      ? 'ALL BRANCHES · STOCK VALUE'
-      : `${branches.find(b => b.id === selectedBranchId)?.name?.toUpperCase() ?? 'BRANCH'} · STOCK VALUE`
-    : 'STOCK VALUE';
+      ? 'Total Stock Value (All Branches)'
+      : `Stock Value (${getBranchName(selectedBranchId)})`
+    : 'Total Stock Value';
 
   // Category grid columns: 2 on phone, 3 on tablet, 4 on large tablet.
   const categoryColumns = gridColumns;
@@ -628,17 +707,15 @@ export default function InventoryScreen() {
 
         <View style={styles.rowBody}>
           <View style={styles.rowTopLine}>
-            <Text style={styles.rowTitle} numberOfLines={1}>{item.name}</Text>
+            <Text style={styles.rowTitle} numberOfLines={3}>{item.name}</Text>
             <Text style={styles.rowPrice}>{naira(Number(item.effective_price))}</Text>
           </View>
           <View style={styles.rowBottomLine}>
-            <Text style={styles.rowMeta}>{item.sku}</Text>
-            {item.category && <Text style={styles.rowMeta}> · {item.category.name}</Text>}
-            {isAdmin && item.branch_id && (
-              <Text style={styles.rowMeta}> · {getBranchName(item.branch_id)}</Text>
+            {branches.length > 1 && item.branch_id && (
+              <Text style={styles.rowMeta}>{getBranchName(item.branch_id)}</Text>
             )}
             {qty !== null && (
-              <View style={[styles.badge, { backgroundColor: stockBg, marginLeft: 6 }]}>
+              <View style={[styles.badge, { backgroundColor: stockBg, marginLeft: (branches.length > 1 && item.branch_id) ? 6 : 0 }]}>
                 <Text style={[styles.badgeText, { color: stockColor }]}>{qty} units</Text>
               </View>
             )}
@@ -646,6 +723,10 @@ export default function InventoryScreen() {
         </View>
 
         <View style={styles.rowActions}>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => { setLedgerProduct(item); setShowLedger(true); }}
+            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
+            <MaterialCommunityIcons name="history" size={18} color={C.muted} />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.iconBtn} onPress={() => openStockAdjust(item)}
             hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
             <MaterialCommunityIcons name="package-variant" size={18} color={C.accent} />
@@ -681,7 +762,7 @@ export default function InventoryScreen() {
           <Text style={styles.catCardCountNum}>{productCount}</Text>
           {' products'}
         </Text>
-        {isAdmin && item.branch_id && (
+        {branches.length > 1 && item.branch_id && (
           <Text style={[styles.catCardCount, { marginTop: 2 }]} numberOfLines={1}>
             {getBranchName(item.branch_id)}
           </Text>
@@ -838,6 +919,14 @@ export default function InventoryScreen() {
                 color={showSearch ? C.accent : C.ink}
               />
             </TouchableOpacity>
+            {isAdmin && (
+              <TouchableOpacity
+                style={styles.headerBtn}
+                onPress={() => navigation.navigate('StockCounts')}
+              >
+                <MaterialCommunityIcons name="clipboard-check-outline" size={20} color={C.accent} />
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Search bar */}
@@ -865,7 +954,7 @@ export default function InventoryScreen() {
           {renderSegmentBar()}
 
           {/* Branch filter */}
-          {isAdmin && branches.length > 0 && (
+          {branches.length > 1 && (
             <ScrollView
               horizontal showsHorizontalScrollIndicator={false}
               style={styles.branchBar} contentContainerStyle={styles.branchBarContent}
@@ -1049,7 +1138,7 @@ export default function InventoryScreen() {
             </ScrollView>
           ) : (
             <View style={styles.loadingCenter}>
-              <MaterialCommunityIcons name="package-variant-outline" size={48} color={C.border} />
+              <MaterialCommunityIcons name="package-variant" size={48} color={C.border} />
               <Text style={{ color: C.muted, marginTop: spacing.md, fontSize: fontSize.base }}>
                 Select a product to view details
               </Text>
@@ -1058,12 +1147,18 @@ export default function InventoryScreen() {
         </View>
 
         {/* ── Modals (stock adjust, product form, etc.) ────────── */}
-        {/* Product form modal */}
+{/* Product form modal */}
         <Modal visible={showProductForm} transparent animationType="slide" onRequestClose={() => setShowProductForm(false)}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
             {/* Product form content goes here - reuse existing modal content */}
           </KeyboardAvoidingView>
         </Modal>
+        <ProductMovementSheet
+          visible={showLedger}
+          onClose={() => setShowLedger(false)}
+          productId={ledgerProduct?.id ?? null}
+          productName={ledgerProduct?.name ?? null}
+        />
       </View>
     );
   }
@@ -1090,6 +1185,14 @@ export default function InventoryScreen() {
               color={showSearch ? C.accent : C.ink}
             />
           </TouchableOpacity>
+          {isAdmin && (
+            <TouchableOpacity
+              style={[styles.headerBtn, { marginLeft: 8 }]}
+              onPress={() => navigation.navigate('StockCounts')}
+            >
+              <MaterialCommunityIcons name="clipboard-check-outline" size={20} color={C.accent} />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -1150,7 +1253,7 @@ export default function InventoryScreen() {
       </View>
 
       {/* Branch filter chips — admin only */}
-      {isAdmin && branches.length > 0 && (
+      {branches.length > 1 && (
         <ScrollView
           horizontal showsHorizontalScrollIndicator={false}
           style={styles.branchBar} contentContainerStyle={styles.branchBarContent}
@@ -1242,7 +1345,7 @@ export default function InventoryScreen() {
               ListEmptyComponent={
                 <View style={styles.emptyState}>
                   <MaterialCommunityIcons
-                    name={q ? 'magnify-close' : 'package-variant-closed'}
+                    name={q ? 'magnify-close' : 'package-variant'}
                     size={48}
                     color={C.border}
                   />
@@ -1292,7 +1395,7 @@ export default function InventoryScreen() {
         <Dialog visible={showCategoryForm} onDismiss={() => setShowCategoryForm(false)}>
           <Dialog.Title>{editingCategory ? 'Edit Category' : 'New Category'}</Dialog.Title>
           <Dialog.Content>
-            {isAdmin && !editingCategory && (
+            {branches.length > 1 && !editingCategory && (
               <Surface style={styles.branchBadge} elevation={0}>
                 <MaterialCommunityIcons name="source-branch" size={15} color={C.accent} />
                 <Text style={styles.branchBadgeText}>
@@ -1302,7 +1405,7 @@ export default function InventoryScreen() {
                 </Text>
               </Surface>
             )}
-            {isAdmin && editingCategory && editingCategory.branch_id && (
+            {branches.length > 1 && editingCategory && editingCategory.branch_id && (
               <Surface style={styles.branchBadge} elevation={0}>
                 <MaterialCommunityIcons name="source-branch" size={15} color={C.accent} />
                 <Text style={styles.branchBadgeText}>
@@ -1397,7 +1500,7 @@ export default function InventoryScreen() {
 
           <ScrollView contentContainerStyle={styles.modalBody} style={{ flex: 1, backgroundColor: C.bg }}>
 
-            {isAdmin && !editingProduct && (
+            {branches.length > 1 && !editingProduct && (
               <Surface style={[styles.branchBadge, { marginBottom: 16 }]} elevation={0}>
                 <MaterialCommunityIcons name="source-branch" size={15} color={C.accent} />
                 <Text style={styles.branchBadgeText}>
@@ -1407,7 +1510,7 @@ export default function InventoryScreen() {
                 </Text>
               </Surface>
             )}
-            {isAdmin && editingProduct && editingProduct.branch_id && (
+            {branches.length > 1 && editingProduct && editingProduct.branch_id && (
               <Surface style={[styles.branchBadge, { marginBottom: 16 }]} elevation={0}>
                 <MaterialCommunityIcons name="source-branch" size={15} color={C.accent} />
                 <Text style={styles.branchBadgeText}>
@@ -1554,6 +1657,53 @@ export default function InventoryScreen() {
               mode="outlined" style={[styles.input, { marginTop: 12 }]}
               multiline numberOfLines={3} />
 
+            <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Product Image</Text>
+            <View style={styles.imageSection}>
+              {productForm.image_url ? (
+                <View style={styles.imagePreviewContainer}>
+                  <Image
+                    source={{ uri: `${API_BASE_URL.replace('/v1', '')}${productForm.image_url}` }}
+                    style={styles.imagePreview}
+                  />
+                  <View style={styles.imageActions}>
+                    <Button
+                      mode="contained-tonal"
+                      buttonColor="rgba(251,113,133,0.15)"
+                      textColor="#FB7185"
+                      onPress={() => setProductForm(f => ({ ...f, image_url: '' }))}
+                      style={{ flex: 1, marginRight: 8 }}
+                    >
+                      Remove
+                    </Button>
+                    <Button
+                      mode="contained-tonal"
+                      onPress={pickImage}
+                      disabled={uploadingImage}
+                      style={{ flex: 1 }}
+                    >
+                      Replace
+                    </Button>
+                  </View>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.imagePlaceholder}
+                  onPress={pickImage}
+                  disabled={uploadingImage}
+                  activeOpacity={0.7}
+                >
+                  {uploadingImage ? (
+                    <ActivityIndicator size="small" color={C.accent} />
+                  ) : (
+                    <>
+                      <MaterialCommunityIcons name="camera-plus" size={24} color={C.muted} style={{ marginBottom: 4 }} />
+                      <Text style={styles.imagePlaceholderText}>Upload Product Image</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+
           </ScrollView>
 
           {/* Sticky footer */}
@@ -1591,6 +1741,12 @@ export default function InventoryScreen() {
           setBarcodeScannerOpen(false);
           setProductForm(f => ({ ...f, barcode: code }));
         }}
+      />
+      <ProductMovementSheet
+        visible={showLedger}
+        onClose={() => setShowLedger(false)}
+        productId={ledgerProduct?.id ?? null}
+        productName={ledgerProduct?.name ?? null}
       />
     </View>
   );
@@ -1978,4 +2134,44 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: C.border,
   },
   dropdownItemSelected: { backgroundColor: C.violetBg },
+
+  // Product Image Styles
+  imageSection: {
+    marginBottom: 16,
+  },
+  imagePreviewContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: R.md,
+    padding: 8,
+  },
+  imagePreview: {
+    width: 80,
+    height: 80,
+    borderRadius: R.sm,
+    backgroundColor: C.border,
+  },
+  imageActions: {
+    flex: 1,
+    flexDirection: 'row',
+    marginLeft: 12,
+  },
+  imagePlaceholder: {
+    height: 100,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderStyle: 'dashed',
+    borderRadius: R.md,
+    backgroundColor: C.card,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imagePlaceholderText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: C.muted,
+  },
 });

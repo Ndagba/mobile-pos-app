@@ -59,14 +59,6 @@ export default function CustomersHero({ stats }: CustomersHeroProps) {
 
         {/* Stats row */}
         <View style={{ flexDirection: 'row', gap: 12 }}>
-          {/* VIP */}
-          <View style={{ flex: 1 }}>
-            <Text style={styles.statLabel}>VIP</Text>
-            <Text style={styles.statValue}>{stats.vipCount}</Text>
-          </View>
-
-          <View style={styles.divider} />
-
           {/* Active 30d */}
           <View style={{ flex: 1 }}>
             <Text style={styles.statLabel}>ACTIVE 30D</Text>

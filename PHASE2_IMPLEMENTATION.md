@@ -61,7 +61,7 @@ docker-compose ps
 #### Step 1.4: Verify Database Connection
 ```bash
 # Test PostgreSQL
-psql postgresql://pos_user:password@localhost:5432/mobilepos -c "SELECT NOW();"
+psql postgresql://pos_user:secure_password@localhost:5432/mobilepos -c "SELECT NOW();"
 
 # Should return current timestamp if successful
 
@@ -1400,7 +1400,7 @@ npm test
 
 ---
 
-### Day 17-18: Integration & E2E Tests
+### Day 17-18: Integration & E2E Tests@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
 #### Step 10.1: Complete Checkout Flow Test
 ```bash

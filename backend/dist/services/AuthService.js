@@ -7,10 +7,9 @@ exports.AuthService = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const uuid_1 = require("uuid");
-const client_1 = require("@prisma/client");
+const prisma_1 = require("../lib/prisma");
 const errorHandler_1 = require("../utils/errorHandler");
 const logger_1 = require("../utils/logger");
-const prisma = new client_1.PrismaClient();
 class AuthService {
     static generateTokens(userId, email, role, storeId, branchId, isSuperAdmin = false) {
         const accessToken = jsonwebtoken_1.default.sign({
@@ -27,7 +26,7 @@ class AuthService {
     static async biometricVerify(payload) {
         const { biometric_token_hash, device_id } = payload;
         try {
-            const user = await prisma.user.findFirst({
+            const user = await prisma_1.prisma.user.findFirst({
                 where: {
                     biometric_token_hash,
                     device_id,
@@ -48,7 +47,7 @@ class AuthService {
             }
             const { accessToken, refreshToken } = this.generateTokens(user.id, user.email, user.role, user.store_id, user.branch_id, user.is_super_admin);
             // Update last login
-            await prisma.user.update({
+            await prisma_1.prisma.user.update({
                 where: { id: user.id },
                 data: { last_login_at: new Date() }
             });
@@ -83,7 +82,7 @@ class AuthService {
     static async refreshAccessToken(refreshToken) {
         try {
             const decoded = jsonwebtoken_1.default.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET || 'refresh-secret');
-            const user = await prisma.user.findUnique({
+            const user = await prisma_1.prisma.user.findUnique({
                 where: { id: decoded.userId },
                 select: {
                     id: true,
@@ -118,7 +117,7 @@ class AuthService {
         }
     }
     static async login(username, password) {
-        const user = await prisma.user.findUnique({
+        const user = await prisma_1.prisma.user.findUnique({
             where: { username: username.toLowerCase().trim() },
             select: {
                 id: true,
@@ -144,7 +143,7 @@ class AuthService {
             throw new errorHandler_1.AppError(401, 'Invalid username or password');
         }
         const { accessToken, refreshToken } = this.generateTokens(user.id, user.email, user.role, user.store_id, user.branch_id, user.is_super_admin);
-        await prisma.user.update({
+        await prisma_1.prisma.user.update({
             where: { id: user.id },
             data: { last_login_at: new Date() }
         });
@@ -165,18 +164,18 @@ class AuthService {
     }
     static async registerEmployee(username, email, firstName, lastName, role, storeId, password, branchId) {
         const normalizedUsername = username.toLowerCase().trim();
-        const existingEmail = await prisma.user.findUnique({ where: { email } });
+        const existingEmail = await prisma_1.prisma.user.findUnique({ where: { email } });
         if (existingEmail) {
             throw new errorHandler_1.AppError(409, 'Email already registered');
         }
-        const existingUsername = await prisma.user.findUnique({
+        const existingUsername = await prisma_1.prisma.user.findUnique({
             where: { username: normalizedUsername }
         });
         if (existingUsername) {
             throw new errorHandler_1.AppError(409, 'Username already taken');
         }
         const password_hash = await bcryptjs_1.default.hash(password, 10);
-        const user = await prisma.user.create({
+        const user = await prisma_1.prisma.user.create({
             data: {
                 id: (0, uuid_1.v4)(),
                 email,
@@ -202,7 +201,7 @@ class AuthService {
         return user;
     }
     static async setBiometricToken(userId, biometricTokenHash, deviceId) {
-        await prisma.user.update({
+        await prisma_1.prisma.user.update({
             where: { id: userId },
             data: {
                 biometric_token_hash: biometricTokenHash,
@@ -211,7 +210,7 @@ class AuthService {
         });
     }
     static async logAudit(userId, action, resourceType, resourceId, changes) {
-        await prisma.auditLog.create({
+        await prisma_1.prisma.auditLog.create({
             data: {
                 user_id: userId,
                 action,
@@ -225,12 +224,12 @@ class AuthService {
         if (requesterRole !== 'admin' && requesterRole !== 'manager') {
             throw new errorHandler_1.AppError(403, 'Only admins/managers can reset passwords');
         }
-        const target = await prisma.user.findUnique({ where: { id: targetUserId } });
+        const target = await prisma_1.prisma.user.findUnique({ where: { id: targetUserId } });
         if (!target) {
             throw new errorHandler_1.AppError(404, 'User not found');
         }
         const password_hash = await bcryptjs_1.default.hash(newPassword, 10);
-        await prisma.user.update({
+        await prisma_1.prisma.user.update({
             where: { id: targetUserId },
             data: { password_hash }
         });
@@ -238,13 +237,13 @@ class AuthService {
         return { message: 'Password reset successfully' };
     }
     static async updateEmployeeRole(userId, newRole, updatedByUserId) {
-        const updater = await prisma.user.findUnique({
+        const updater = await prisma_1.prisma.user.findUnique({
             where: { id: updatedByUserId }
         });
         if (updater?.role !== 'admin') {
             throw new errorHandler_1.AppError(403, 'Only admins can change roles');
         }
-        const updated = await prisma.user.update({
+        const updated = await prisma_1.prisma.user.update({
             where: { id: userId },
             data: { role: newRole }
         });
@@ -255,7 +254,7 @@ class AuthService {
         return updated;
     }
     static async deactivateUser(userId, reason) {
-        return prisma.user.update({
+        return prisma_1.prisma.user.update({
             where: { id: userId },
             data: {
                 is_active: false,

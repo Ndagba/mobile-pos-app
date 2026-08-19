@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -352,6 +352,7 @@ export default function AdminSubscriptionsScreen() {
           setCreateOpen(false);
           reload();
         }}
+        existingStoreIds={useMemo(() => subs.map(s => s.storeId), [subs])}
       />
     </View>
   );
@@ -555,8 +556,8 @@ function ActionButton({
 
 // ─── Create Subscription bottom sheet ────────────────────────
 function CreateSubscriptionSheet({
-  visible, onClose, onCreated,
-}: { visible: boolean; onClose: () => void; onCreated: () => void }) {
+  visible, onClose, onCreated, existingStoreIds = [],
+}: { visible: boolean; onClose: () => void; onCreated: () => void; existingStoreIds?: string[] }) {
   const insets = useSafeAreaInsets();
 
   const [storeId, setStoreId] = useState('');
@@ -564,6 +565,39 @@ function CreateSubscriptionSheet({
   const [duration, setDuration] = useState<'1' | '3' | '6' | '12'>('1');
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  const [allStores, setAllStores] = useState<{ id: string; name: string }[]>([]);
+  const [loadingStores, setLoadingStores] = useState(false);
+  const [dropdownVisible, setDropdownVisible] = useState(false);
+
+  useEffect(() => {
+    if (visible) {
+      const fetchStores = async () => {
+        setLoadingStores(true);
+        try {
+          const res = await ApiClient.get<{ id: string; name: string }[]>('/stores');
+          setAllStores(res || []);
+        } catch (err) {
+          console.error('Failed to load stores:', err);
+        } finally {
+          setLoadingStores(false);
+        }
+      };
+      fetchStores();
+    }
+  }, [visible]);
+
+  const availableStores = useMemo(() => {
+    return allStores.filter(store => !existingStoreIds.includes(store.id));
+  }, [allStores, existingStoreIds]);
+
+  const filteredStores = useMemo(() => {
+    if (!storeId.trim()) return availableStores;
+    const query = storeId.toLowerCase().trim();
+    return availableStores.filter(
+      store => store.id.toLowerCase().includes(query) || store.name.toLowerCase().includes(query)
+    );
+  }, [availableStores, storeId]);
 
   const planMeta = useMemo(() => {
     if (plan === 'Pro') {
@@ -605,6 +639,7 @@ function CreateSubscriptionSheet({
     setPlan('Business');
     setDuration('1');
     setReason('');
+    setDropdownVisible(false);
   };
 
   const handleSubmit = async () => {
@@ -672,22 +707,58 @@ function CreateSubscriptionSheet({
 
           {/* Body */}
           <ScrollView
-            style={{ flex: 1 }}
+            style={{ flexShrink: 1 }}
             contentContainerStyle={styles.sheetBody}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
             {/* Store ID */}
             <FieldLabel label="Store ID" required />
-            <TextInput
-              value={storeId}
-              onChangeText={setStoreId}
-              placeholder="e.g. store_014"
-              placeholderTextColor={C.muted}
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={styles.input}
-            />
+            <View style={{ zIndex: 999 }}>
+              <TextInput
+                value={storeId}
+                onChangeText={(val) => {
+                  setStoreId(val);
+                  setDropdownVisible(true);
+                }}
+                placeholder="e.g. store_014"
+                placeholderTextColor={C.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={styles.input}
+                onFocus={() => setDropdownVisible(true)}
+                onBlur={() => {
+                  setTimeout(() => setDropdownVisible(false), 250);
+                }}
+              />
+
+              {dropdownVisible && filteredStores.length > 0 && (
+                <View style={styles.dropdownContainer}>
+                  <ScrollView
+                    style={{ maxHeight: 150 }}
+                    nestedScrollEnabled
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    {filteredStores.map(store => (
+                      <TouchableOpacity
+                        key={store.id}
+                        style={styles.dropdownItem}
+                        onPress={() => {
+                          setStoreId(store.id);
+                          setDropdownVisible(false);
+                        }}
+                      >
+                        <MaterialCommunityIcons name="store" size={16} color={C.accent} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.dropdownItemName}>{store.name}</Text>
+                          <Text style={styles.dropdownItemId}>{store.id}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+            </View>
 
             {/* Plan */}
             <SectionEyebrow>Plan</SectionEyebrow>
@@ -1258,6 +1329,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     maxHeight: '92%',
     paddingTop: 14,
+    flexShrink: 1,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -1514,5 +1586,46 @@ const styles = StyleSheet.create({
     color: C.accentFg,
     fontWeight: '700',
     fontSize: 14,
+  },
+  dropdownContainer: {
+    position: 'absolute',
+    top: 50,
+    left: 0,
+    right: 0,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 12,
+    maxHeight: 160,
+    zIndex: 9999,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 10,
+      },
+      android: { elevation: 8 },
+    }),
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  dropdownItemName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: C.ink,
+  },
+  dropdownItemId: {
+    fontSize: 10,
+    fontFamily: F.mono,
+    color: C.muted,
+    marginTop: 1,
   },
 });

@@ -169,7 +169,15 @@ const doc = new Document({
         }),
         new Paragraph({
           numbering: { reference: "numbers", level: 0 },
-          children: [new TextRun("Core Features & Workflows")],
+          children: [new TextRun("Suppliers Directory & Ledger")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("Physical Stock Count & Reconciliation")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("Inventory Movement Ledger")],
         }),
         new Paragraph({
           numbering: { reference: "numbers", level: 0 },
@@ -611,10 +619,233 @@ const doc = new Document({
           children: [new PageBreak()],
         }),
 
+        // Suppliers Directory & Ledger
+        new Paragraph({
+          heading: HeadingLevel.HEADING_1,
+          children: [new TextRun("5. Suppliers Directory & Ledger")],
+        }),
+        new Paragraph({
+          spacing: { before: 120, after: 120 },
+          children: [
+            new TextRun("The Suppliers Directory is a centralized vendor management hub. It enables Admins and Managers to track inventory acquisition costs, outstanding liabilities, and individual invoice payment statuses."),
+          ],
+        }),
+        new Paragraph({
+          heading: HeadingLevel.HEADING_2,
+          children: [new TextRun("Suppliers Directory")],
+        }),
+        new Paragraph({
+          spacing: { before: 100, after: 100 },
+          children: [new TextRun("To access and manage your suppliers:")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("Navigate to 'Suppliers' from the side navigation menu.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("Use the filter chips at the top to toggle between All, Preferred, and Blocked suppliers.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("Search for specific suppliers using the top search bar (by name or category).")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("To add a supplier, tap '+ Add Supplier', fill in the name, phone number, email address, physical address, notes, and select their category and tag, then save.")],
+        }),
+        new Paragraph({
+          spacing: { before: 120, after: 120 },
+          children: [
+            new TextRun("Tapping on any supplier displays their profile bottom sheet containing quick statistics:"),
+          ],
+        }),
+        new Paragraph({
+          numbering: { reference: "bullets", level: 0 },
+          children: [new TextRun("Invoiced: Total value of goods purchased from them.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "bullets", level: 0 },
+          children: [new TextRun("Paid: Total payments sent to the supplier.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "bullets", level: 0 },
+          children: [new TextRun("Owing: Outstanding debt currently owed to the supplier.")],
+        }),
+
+        new Paragraph({
+          heading: HeadingLevel.HEADING_2,
+          children: [new TextRun("Supplier Ledger & Invoices")],
+        }),
+        new Paragraph({
+          spacing: { before: 100, after: 100 },
+          children: [new TextRun("To manage purchase invoices and log payments for a supplier:")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("Tap the supplier in the directory and select 'View Ledger'.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("The 'Invoices' tab lists all purchase records. Tap '+ Add Invoice' to log a new purchase. The invoice reference (e.g. INV-YYYYMMDD-XXXX) is auto-generated but can be edited.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("Enter the Invoice Date, Due Date, Quantity purchased, Unit Price, Total Amount, and any relevant description/notes, then tap save.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("To record a payment against an invoice, switch to the 'Payments' tab and tap '+ Record Payment'. Enter the payment amount, date, notes, and choose the matching invoice, then save.")],
+        }),
+        new Paragraph({
+          spacing: { before: 120, after: 120 },
+          children: [
+            new TextRun("The system automatically recalculates the cumulative payments against the invoice and shifts the status indicator dynamically:"),
+          ],
+        }),
+        new Paragraph({
+          numbering: { reference: "bullets", level: 0 },
+          children: [new TextRun("Unpaid: No payments have been logged for this invoice.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "bullets", level: 0 },
+          children: [new TextRun("Partial: Payments have been made but they do not cover the full invoice amount.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "bullets", level: 0 },
+          children: [new TextRun("Paid: The invoice amount has been fully covered by payments.")],
+        }),
+
+        new Paragraph({
+          children: [new PageBreak()],
+        }),
+
+        // Physical Stock Count & Reconciliation
+        new Paragraph({
+          heading: HeadingLevel.HEADING_1,
+          children: [new TextRun("6. Physical Stock Count & Reconciliation")],
+        }),
+        new Paragraph({
+          spacing: { before: 120, after: 120 },
+          children: [
+            new TextRun("The Stock Count module provides a mechanism for managers to perform regular inventory audits, identifying shrinkage or stock discrepancies and reconciling the digital database with physical shelf items."),
+          ],
+        }),
+        new Paragraph({
+          heading: HeadingLevel.HEADING_2,
+          children: [new TextRun("Starting an Audit Session")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("Open the side menu and navigate to 'Stock Counts'.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("If you are logged in as an Admin, select the target branch from the dropdown menu. If you are a Manager, the session defaults to your assigned branch.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("Tap '+ New Count', enter a reference note (e.g. 'End of Month Audit'), and tap 'Create'. This initializes a draft session capturing all catalog products with their current system stock counts.")],
+        }),
+        new Paragraph({
+          heading: HeadingLevel.HEADING_2,
+          children: [new TextRun("Entering Counts & Barcode Scanning")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("Open the active count session. You will see a list of products with their system inventory quantities.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("Search for a product by typing its name/SKU, or tap the Barcode Scan icon to scan the item's barcode using your mobile device's camera.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("Tap the product row to enter the physical quantity counted. The system will instantly calculate the Variance (Variance = Physical Quantity - System Quantity). Positive variance denotes overages, while negative variance highlights shrinkage.")],
+        }),
+        new Paragraph({
+          heading: HeadingLevel.HEADING_2,
+          children: [new TextRun("Reconciling and Adjusting Stock")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("Double check any highlighted variances to ensure accurate entry.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("When satisfied, tap 'Complete' in the header.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("Confirm the action. On completion, the system applies the counts, overriding old stock counts with physical values, closing the audit session, and generating inventory ledger entries.")],
+        }),
+
+        new Paragraph({
+          children: [new PageBreak()],
+        }),
+
+        // Inventory Movement Ledger
+        new Paragraph({
+          heading: HeadingLevel.HEADING_1,
+          children: [new TextRun("7. Inventory Movement Ledger")],
+        }),
+        new Paragraph({
+          spacing: { before: 120, after: 120 },
+          children: [
+            new TextRun("For auditing and compliance, the Inventory Movement Ledger records every transaction or action that alters a product's stock levels. This makes it simple to trace the origin of stock discrepancies."),
+          ],
+        }),
+        new Paragraph({
+          heading: HeadingLevel.HEADING_2,
+          children: [new TextRun("Viewing a Product's Ledger")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("Navigate to the 'Inventory' section from the main menu.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("Locate and tap on the product you wish to investigate.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "numbers", level: 0 },
+          children: [new TextRun("In the detail pop-up card, select 'Inventory Ledger' (or 'Product Movement'). The system will display the movement sheet.")],
+        }),
+        new Paragraph({
+          heading: HeadingLevel.HEADING_2,
+          children: [new TextRun("Understanding Movement Records")],
+        }),
+        new Paragraph({
+          spacing: { before: 120, after: 120 },
+          children: [
+            new TextRun("The movement log lists entries chronologically, capturing the following details:"),
+          ],
+        }),
+        new Paragraph({
+          numbering: { reference: "bullets", level: 0 },
+          children: [new TextRun("Movement Type: SALE (checkout deduction), RETURN (customer return addition), PURCHASE (supplier invoice increment), ADJUSTMENT (manual override or stock count reconcile), or TRANSFER (inter-branch movement).")],
+        }),
+        new Paragraph({
+          numbering: { reference: "bullets", level: 0 },
+          children: [new TextRun("Quantity Impact: Displays the relative change (e.g. +24, -3) and color-codes them (green for additions, red for deductions).")],
+        }),
+        new Paragraph({
+          numbering: { reference: "bullets", level: 0 },
+          children: [new TextRun("Timestamp & Operator: Shows the date/time and the name of the cashier or manager who executed the action.")],
+        }),
+        new Paragraph({
+          numbering: { reference: "bullets", level: 0 },
+          children: [new TextRun("Reference/Notes: Logs associated invoice numbers, transaction IDs, stock session notes, or manager descriptions.")],
+        }),
+
+        new Paragraph({
+          children: [new PageBreak()],
+        }),
+
         // Offline Mode
         new Paragraph({
           heading: HeadingLevel.HEADING_1,
-          children: [new TextRun("5. Offline Mode & Synchronization")],
+          children: [new TextRun("8. Offline Mode & Synchronization")],
         }),
 
         new Paragraph({
@@ -690,7 +921,7 @@ const doc = new Document({
         // Troubleshooting
         new Paragraph({
           heading: HeadingLevel.HEADING_1,
-          children: [new TextRun("6. Troubleshooting & FAQ")],
+          children: [new TextRun("9. Troubleshooting & FAQ")],
         }),
 
         new Paragraph({
@@ -1109,6 +1340,6 @@ function createTroubleshootingTable() {
 }
 
 Packer.toBuffer(doc).then((buffer) => {
-  fs.writeFileSync("C:\\Projects\\MobilePOS\\MobilePOS_User_Guide_v2.docx", buffer);
-  console.log("✅ User guide created successfully: MobilePOS_User_Guide_v2.docx");
+  fs.writeFileSync("C:\\Projects\\MobilePOS\\JayPOS_User_Guide.docx", buffer);
+  console.log("✅ User guide created successfully: JayPOS_User_Guide.docx");
 });

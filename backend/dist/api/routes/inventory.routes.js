@@ -1,26 +1,33 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
-const client_1 = require("@prisma/client");
+const prisma_1 = require("../../lib/prisma");
+const redis_1 = require("../../lib/redis");
 const InventoryService_1 = require("../../services/InventoryService");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const errorHandler_1 = require("../../utils/errorHandler");
+const branchHelper_1 = require("../../utils/branchHelper");
 const router = (0, express_1.Router)();
-const prisma = new client_1.PrismaClient();
 router.use(auth_middleware_1.authMiddleware);
 // Get inventory status
 router.get('/', (0, errorHandler_1.catchAsync)(async (req, res) => {
-    const inventory = await InventoryService_1.InventoryService.getInventoryStatus(req.user.storeId);
+    const { cursor, limit = '30' } = req.query;
+    const result = await InventoryService_1.InventoryService.getInventoryStatus(req.user.storeId, cursor, parseInt(limit, 10));
     res.json({
         status: 'success',
-        data: inventory
+        data: result.items,
+        nextCursor: result.nextCursor
     });
 }));
-// Get low stock alerts — filtered by branch for non-admin roles
+// Get low stock alerts.
+//   • Admin: an explicit ?branch_id scopes to that branch; without it the admin
+//     sees the whole store ("All Branches"). The admin's own JWT branch must NOT
+//     scope the result, otherwise the branch chips have no effect.
+//   • Manager / cashier: always scoped to their JWT branch.
 router.get('/low-stock', (0, errorHandler_1.catchAsync)(async (req, res) => {
     const user = req.user;
-    const branchId = user?.branchId ?? null;
-    const alerts = await InventoryService_1.InventoryService.getLowStockAlerts(user.storeId, branchId);
+    const branchIds = await (0, branchHelper_1.getAuthorizedBranchIds)(req);
+    const alerts = await InventoryService_1.InventoryService.getLowStockAlerts(user.storeId, branchIds);
     res.json({
         status: 'success',
         data: alerts,
@@ -55,7 +62,7 @@ router.patch('/threshold/store', (0, errorHandler_1.catchAsync)(async (req, res)
     const storeId = user?.storeId ?? null;
     let updatedCount = 0;
     if (storeId) {
-        const result = await prisma.$executeRaw `
+        const result = await prisma_1.prisma.$executeRaw `
         UPDATE "Inventory"
         SET    low_stock_threshold = ${thresholdBigInt}
         WHERE  product_id IN (
@@ -69,11 +76,22 @@ router.patch('/threshold/store', (0, errorHandler_1.catchAsync)(async (req, res)
     }
     else {
         // Super-admin / no store context — update everything
-        const result = await prisma.inventory.updateMany({
+        const result = await prisma_1.prisma.inventory.updateMany({
             where: {},
             data: { low_stock_threshold: thresholdBigInt },
         });
         updatedCount = result.count;
+    }
+    // Invalidate the cached inventory list for this store so the new
+    // threshold (and any status recalculated from it) shows up immediately
+    // instead of waiting out the cache TTL.
+    if (storeId) {
+        try {
+            await redis_1.redis.del(`inventory:${storeId}:first:30`);
+        }
+        catch (error) {
+            // Non-fatal — the cache will still expire on its own TTL.
+        }
     }
     res.json({
         status: 'success',
@@ -140,6 +158,50 @@ router.get('/turnover', (0, errorHandler_1.catchAsync)(async (req, res) => {
     res.json({
         status: 'success',
         data: result
+    });
+}));
+// Get inventory movements (ledger)
+router.get('/movements', (0, errorHandler_1.catchAsync)(async (req, res) => {
+    const user = req.user;
+    const { product_id, branch_id, dateFrom, dateTo, type, limit = '50', offset = '0' } = req.query;
+    const where = { store_id: user.storeId };
+    if (product_id)
+        where.product_id = product_id;
+    const branchIds = await (0, branchHelper_1.getAuthorizedBranchIds)(req);
+    where.branch_id = { in: branchIds };
+    if (type)
+        where.movement_type = type;
+    if (dateFrom || dateTo) {
+        where.timestamp = {};
+        if (dateFrom)
+            where.timestamp.gte = new Date(dateFrom);
+        if (dateTo)
+            where.timestamp.lte = new Date(dateTo);
+    }
+    const [movements, total] = await Promise.all([
+        prisma_1.prisma.inventoryMovement.findMany({
+            where,
+            include: {
+                product: { select: { name: true, sku: true } },
+                user: { select: { first_name: true, last_name: true } }
+            },
+            orderBy: { timestamp: 'desc' },
+            take: parseInt(limit, 10),
+            skip: parseInt(offset, 10)
+        }),
+        prisma_1.prisma.inventoryMovement.count({ where })
+    ]);
+    res.json({
+        status: 'success',
+        data: movements.map(m => ({
+            ...m,
+            quantity: Number(m.quantity)
+        })),
+        pagination: {
+            total,
+            limit: parseInt(limit, 10),
+            offset: parseInt(offset, 10)
+        }
     });
 }));
 exports.default = router;

@@ -9,6 +9,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { useSelector } from 'react-redux';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RootState } from '../redux/store';
 import ApiClient from '../services/ApiClient';
 import { C, R, S, F } from '../theme';
@@ -16,7 +17,10 @@ import { useResponsive, responsiveSpacing, responsiveFontSize, responsiveMinTouc
 
 // ─── Types ────────────────────────────────────────────────────
 type StatusFilter = 'all' | 'completed' | 'refunded';
-type DateFilter   = 'today' | 'week';
+type DateFilter   = 'today' | 'week' | 'custom';
+
+interface Branch { id: string; name: string; is_active: boolean; }
+
 
 interface TxItem {
   id?: string;
@@ -143,7 +147,13 @@ const fmtDateTime = (iso: string) => {
     + ' · ' + d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' });
 };
 
-const getDateRange = (filter: DateFilter) => {
+const getDateRange = (filter: DateFilter, customFrom?: string, customTo?: string) => {
+  if (filter === 'custom' && customFrom && customTo) {
+    return {
+      dateFrom: new Date(customFrom + 'T00:00:00').toISOString(),
+      dateTo:   new Date(customTo   + 'T23:59:59').toISOString(),
+    };
+  }
   const to = new Date(); to.setHours(23, 59, 59, 999);
   const from = new Date();
   if (filter === 'today') { from.setHours(0, 0, 0, 0); }
@@ -183,6 +193,14 @@ export default function TransactionsScreen() {
     route.params?.mode === 'refund' ? 'completed' : 'all',
   );
   const [dateFilter, setDateFilter]     = useState<DateFilter>('week');
+  const [customFrom, setCustomFrom]     = useState('');
+  const [customTo,   setCustomTo]       = useState('');
+  const [showDateRange, setShowDateRange] = useState(false);
+
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
+  const selectedBranchRef = useRef<string | null>(null);
+
 
   const [selectedTx, setSelectedTx]       = useState<Transaction | null>(null);
   const [receiptOpen, setReceiptOpen]      = useState(false);
@@ -205,21 +223,18 @@ export default function TransactionsScreen() {
   const PAGE_SIZE = 20;
 
   // ── Net total for the header summary card ─────────────────────
-  const netTotal = useMemo(
-    () => transactions.reduce((sum, t) => {
-      const amt = Number(t.total_amount) || 0;
-      return sum + (t.status === 'refunded' ? -amt : amt);
-    }, 0),
-    [transactions],
-  );
-  const avgSale = transactions.length
-    ? Math.round(Math.abs(netTotal) / transactions.length)
+  const [totalCount, setTotalCount] = useState(0);
+  const [serverNetSum, setServerNetSum] = useState(0);
+  const avgSale = totalCount
+    ? Math.round(Math.abs(serverNetSum) / totalCount)
     : 0;
 
   // ── Load ──────────────────────────────────────────────────────
   const load = useCallback(async (opts: {
     pg?: number; refresh?: boolean; status?: StatusFilter;
     date?: DateFilter; q?: string;
+    from?: string; to?: string;
+    branchId?: string | null;
   } = {}) => {
     if (receiptOpenRef.current) {
       if (__DEV__) console.warn('[TX] load() suppressed – receipt open', opts);
@@ -232,6 +247,9 @@ export default function TransactionsScreen() {
       status = statusFilter,
       date   = dateFilter,
       q      = searchQuery,
+      from   = customFrom,
+      to     = customTo,
+      branchId = selectedBranchRef.current,
     } = opts;
 
     const myReq = ++reqId.current;
@@ -239,11 +257,12 @@ export default function TransactionsScreen() {
     else          { setLoadingMore(true); loadingMoreRef.current = true; }
 
     try {
-      const { dateFrom, dateTo } = getDateRange(date);
+      const { dateFrom, dateTo } = getDateRange(date, from, to);
       const params = [
         `page=${pg}`, `limit=${PAGE_SIZE}`,
         ...(status !== 'all' ? [`status=${status}`] : []),
         ...(q.trim() ? [`search=${encodeURIComponent(q.trim())}`] : []),
+        ...(branchId ? [`branchId=${encodeURIComponent(branchId)}`] : []),
         `dateFrom=${encodeURIComponent(dateFrom)}`,
         `dateTo=${encodeURIComponent(dateTo)}`,
       ];
@@ -255,6 +274,8 @@ export default function TransactionsScreen() {
 
       if (pg === 1) {
         setTransactions(list);
+        setServerNetSum(res?.netSum ?? 0);
+        setTotalCount(res?.pagination?.total ?? list.length);
       } else {
         setTransactions(prev => {
           const seen  = new Set(prev.map(t => t.id));
@@ -272,17 +293,35 @@ export default function TransactionsScreen() {
         setRefreshing(false); loadingMoreRef.current = false;
       }
     }
-  }, [statusFilter, dateFilter, searchQuery]);
+  }, [statusFilter, dateFilter, searchQuery, customFrom, customTo, selectedBranchId]);
+
+
+  const loadBranches = async () => {
+    try {
+      const res: any = await ApiClient.get('/branches');
+      const list: Branch[] = Array.isArray(res) ? res : res?.data ?? [];
+      setBranches(list.filter((b: Branch) => b.is_active));
+    } catch {}
+  };
+
+  const handleBranchSelect = (branchId: string | null) => {
+    selectedBranchRef.current = branchId;
+    setSelectedBranchId(branchId);
+    load({ pg: 1, branchId });
+  };
 
   useFocusEffect(
     useCallback(() => {
+      loadBranches();
       if (firstFocusDone.current) return;
       firstFocusDone.current = true;
       load();
     }, []), // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  const searchTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  const searchTimer = useRef<any>(null);
+
   const handleSearchChange = (text: string) => {
     setSearchQuery(text);
     clearTimeout(searchTimer.current);
@@ -296,9 +335,18 @@ export default function TransactionsScreen() {
   };
 
   const handleDateChange = (d: DateFilter) => {
-    if (d === dateFilter) return;
+    if (d === dateFilter) {
+      // re-tap Custom toggles the panel
+      if (d === 'custom') setShowDateRange(prev => !prev);
+      return;
+    }
     setDateFilter(d);
-    load({ pg: 1, date: d });
+    if (d === 'custom') {
+      setShowDateRange(true);
+    } else {
+      setShowDateRange(false);
+      load({ pg: 1, date: d });
+    }
   };
 
   const handleRefresh = () => { setRefreshing(true); load({ pg: 1, refresh: true }); };
@@ -327,24 +375,32 @@ export default function TransactionsScreen() {
 
   const shareReceipt = async () => {
     if (!selectedTx) return;
-    const tx = txDetail ?? selectedTx;
-    const items = normalizeItems(tx);
-    const lines = [
-      '===== RECEIPT =====',
-      `Date:    ${fmtDateTime(tx.created_at)}`,
-      `ID:      #${tx.id.slice(-8).toUpperCase()}`,
-      `Cashier: ${resolveName(tx)}`,
-      `Method:  ${METHOD_LABELS[tx.payment_method] ?? tx.payment_method}`,
-      `Status:  ${tx.status.toUpperCase()}`,
-      '',
-      ...(items.length > 0
-        ? items.map(it => `  ${it.product_name} x${it.quantity}  ₦${it.total_price.toLocaleString()}`)
-        : [`  ${resolveItemCount(tx)} item(s)`]),
-      '',
-      `TOTAL:   ₦${tx.total_amount.toLocaleString()}`,
-      '===================',
-    ];
-    try { await Share.share({ message: lines.join('\n'), title: 'Receipt' }); } catch {}
+    try {
+      const tx = txDetail ?? selectedTx;
+      const items = normalizeItems(tx);
+      const bizName = await AsyncStorage.getItem('@pos_business_name') || '';
+      const footerMsg = await AsyncStorage.getItem('@pos_receipt_footer') || '';
+      const lines = [
+        bizName ? bizName : '',
+        '===== RECEIPT =====',
+        `Date:    ${fmtDateTime(tx.created_at)}`,
+        `ID:      #${tx.id.slice(-8).toUpperCase()}`,
+        `Cashier: ${resolveName(tx)}`,
+        `Method:  ${METHOD_LABELS[tx.payment_method] ?? tx.payment_method}`,
+        `Status:  ${tx.status.toUpperCase()}`,
+        '',
+        ...(items.length > 0
+          ? items.map(it => `  ${it.product_name} x${it.quantity}  ₦${it.total_price.toLocaleString()}`)
+          : [`  ${resolveItemCount(tx)} item(s)`]),
+        '',
+        `TOTAL:   ₦${tx.total_amount.toLocaleString()}`,
+        '===================',
+        footerMsg ? footerMsg : '',
+      ].filter(Boolean);
+      await Share.share({ message: lines.join('\n'), title: 'Receipt' });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const confirmRefund = async () => {
@@ -484,7 +540,149 @@ export default function TransactionsScreen() {
                   </Text>
                 </TouchableOpacity>
               ))}
+              <View style={s.chipDivider} />
+              <TouchableOpacity
+                style={[s.chip, dateFilter === 'custom' && s.chipActive, { flexDirection: 'row', alignItems: 'center', gap: 5 }]}
+                onPress={() => handleDateChange('custom')}
+                activeOpacity={0.8}
+              >
+                <MaterialCommunityIcons
+                  name="calendar-range"
+                  size={12}
+                  color={dateFilter === 'custom' ? C.accentFg : C.muted}
+                />
+                <Text style={[s.chipText, dateFilter === 'custom' && s.chipTextActive]}>
+                  {dateFilter === 'custom' && customFrom && customTo
+                    ? `${customFrom} → ${customTo}`
+                    : 'Date Range'}
+                </Text>
+              </TouchableOpacity>
             </ScrollView>
+
+            {branches.length > 1 && (
+              <ScrollView
+                horizontal showsHorizontalScrollIndicator={false}
+                style={s.branchBar} contentContainerStyle={s.branchBarContent}
+              >
+                <TouchableOpacity
+                  style={[s.branchChip, selectedBranchId === null && s.branchChipActive]}
+                  onPress={() => handleBranchSelect(null)}
+                >
+                  <Text style={[s.branchChipText, selectedBranchId === null && s.branchChipTextActive]}>
+                    All Branches
+                  </Text>
+                </TouchableOpacity>
+                {branches.map(b => (
+                  <TouchableOpacity
+                    key={b.id}
+                    style={[s.branchChip, selectedBranchId === b.id && s.branchChipActive]}
+                    onPress={() => handleBranchSelect(b.id)}
+                  >
+                    <Text style={[s.branchChipText, selectedBranchId === b.id && s.branchChipTextActive]}>
+                      {b.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+
+
+            {/* Date range panel — tablet */}
+            {showDateRange && dateFilter === 'custom' && (
+              <View style={{
+                marginHorizontal: 16,
+                marginBottom: 12,
+                backgroundColor: C.card,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: C.border,
+                padding: 16
+              }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 11, color: C.muted, fontWeight: '600', marginBottom: 4 }}>From</Text>
+                    <RNTextInput
+                      value={customFrom}
+                      onChangeText={setCustomFrom}
+                      placeholder="YYYY-MM-DD"
+                      placeholderTextColor={C.muted}
+                      style={{
+                        height: 44,
+                        borderWidth: 1,
+                        borderColor: C.border,
+                        borderRadius: 8,
+                        paddingHorizontal: 12,
+                        color: C.ink,
+                        backgroundColor: C.bg,
+                        fontSize: 13,
+                        fontWeight: '600'
+                      }}
+                      keyboardType="numeric"
+                      maxLength={10}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 11, color: C.muted, fontWeight: '600', marginBottom: 4 }}>To</Text>
+                    <RNTextInput
+                      value={customTo}
+                      onChangeText={setCustomTo}
+                      placeholder="YYYY-MM-DD"
+                      placeholderTextColor={C.muted}
+                      style={{
+                        height: 44,
+                        borderWidth: 1,
+                        borderColor: C.border,
+                        borderRadius: 8,
+                        paddingHorizontal: 12,
+                        color: C.ink,
+                        backgroundColor: C.bg,
+                        fontSize: 13,
+                        fontWeight: '600'
+                      }}
+                      keyboardType="numeric"
+                      maxLength={10}
+                    />
+                  </View>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+                  <TouchableOpacity
+                    onPress={() => setShowDateRange(false)}
+                    style={{ paddingVertical: 8, paddingHorizontal: 12 }}
+                  >
+                    <Text style={{ color: C.muted, fontWeight: '600', fontSize: 14 }}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (!customFrom || !customTo) return;
+                      const parsedFrom = new Date(customFrom);
+                      const parsedTo = new Date(customTo);
+                      if (isNaN(parsedFrom.getTime()) || isNaN(parsedTo.getTime())) {
+                        Alert.alert('Invalid Date', 'Please use YYYY-MM-DD format.');
+                        return;
+                      }
+                      if (parsedTo < parsedFrom) {
+                        Alert.alert('Invalid Range', 'To Date cannot be before From Date.');
+                        return;
+                      }
+                      load({ pg: 1, date: 'custom', from: customFrom, to: customTo });
+                      setShowDateRange(false);
+                    }}
+                    style={{
+                      backgroundColor: C.accent,
+                      borderRadius: 8,
+                      paddingVertical: 8,
+                      paddingHorizontal: 16,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                  >
+                    <MaterialCommunityIcons name="check" size={16} color="#fff" />
+                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>Apply</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
           </View>
 
           {/* List */}
@@ -713,11 +911,11 @@ export default function TransactionsScreen() {
             <View style={s.summaryRow}>
               <View>
                 <Text style={s.summaryLabel}>
-                  NET {dateFilter === 'today' ? 'TODAY' : 'THIS WEEK'}
+                  NET {dateFilter === 'today' ? 'TODAY' : dateFilter === 'week' ? 'THIS WEEK' : 'CUSTOM RANGE'}
                 </Text>
                 <Text style={[s.summaryAmount, MONO]}>
                   <Text style={{ opacity: 0.7 }}>₦</Text>
-                  {Math.abs(netTotal).toLocaleString('en-NG', { maximumFractionDigits: 0 })}
+                  {Math.abs(serverNetSum).toLocaleString('en-NG', { maximumFractionDigits: 0 })}
                 </Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
@@ -756,8 +954,150 @@ export default function TransactionsScreen() {
               </Text>
             </TouchableOpacity>
           ))}
+          <View style={s.chipDivider} />
+          <TouchableOpacity
+            style={[s.chip, dateFilter === 'custom' && s.chipActive, { flexDirection: 'row', alignItems: 'center', gap: 5 }]}
+            onPress={() => handleDateChange('custom')}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons
+              name="calendar-range"
+              size={12}
+              color={dateFilter === 'custom' ? C.accentFg : C.muted}
+            />
+            <Text style={[s.chipText, dateFilter === 'custom' && s.chipTextActive]}>
+              {dateFilter === 'custom' && customFrom && customTo
+                ? `${customFrom} → ${customTo}`
+                : 'Date Range'}
+            </Text>
+          </TouchableOpacity>
         </ScrollView>
+
+        {branches.length > 1 && (
+          <ScrollView
+            horizontal showsHorizontalScrollIndicator={false}
+            style={s.branchBar} contentContainerStyle={s.branchBarContent}
+          >
+            <TouchableOpacity
+              style={[s.branchChip, selectedBranchId === null && s.branchChipActive]}
+              onPress={() => handleBranchSelect(null)}
+            >
+              <Text style={[s.branchChipText, selectedBranchId === null && s.branchChipTextActive]}>
+                All Branches
+              </Text>
+            </TouchableOpacity>
+            {branches.map(b => (
+              <TouchableOpacity
+                key={b.id}
+                style={[s.branchChip, selectedBranchId === b.id && s.branchChipActive]}
+                onPress={() => handleBranchSelect(b.id)}
+              >
+                <Text style={[s.branchChipText, selectedBranchId === b.id && s.branchChipTextActive]}>
+                  {b.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+
       </View>
+
+      {/* Date range panel — phone */}
+      {showDateRange && dateFilter === 'custom' && (
+        <View style={{
+          marginHorizontal: 16,
+          marginBottom: 12,
+          backgroundColor: C.card,
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: C.border,
+          padding: 16
+        }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 11, color: C.muted, fontWeight: '600', marginBottom: 4 }}>From</Text>
+              <RNTextInput
+                value={customFrom}
+                onChangeText={setCustomFrom}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={C.muted}
+                style={{
+                  height: 44,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                  borderRadius: 8,
+                  paddingHorizontal: 12,
+                  color: C.ink,
+                  backgroundColor: C.bg,
+                  fontSize: 13,
+                  fontWeight: '600'
+                }}
+                keyboardType="numeric"
+                maxLength={10}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 11, color: C.muted, fontWeight: '600', marginBottom: 4 }}>To</Text>
+              <RNTextInput
+                value={customTo}
+                onChangeText={setCustomTo}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={C.muted}
+                style={{
+                  height: 44,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                  borderRadius: 8,
+                  paddingHorizontal: 12,
+                  color: C.ink,
+                  backgroundColor: C.bg,
+                  fontSize: 13,
+                  fontWeight: '600'
+                }}
+                keyboardType="numeric"
+                maxLength={10}
+              />
+            </View>
+          </View>
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+            <TouchableOpacity
+              onPress={() => setShowDateRange(false)}
+              style={{ paddingVertical: 8, paddingHorizontal: 12 }}
+            >
+              <Text style={{ color: C.muted, fontWeight: '600', fontSize: 14 }}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => {
+                if (!customFrom || !customTo) return;
+                const parsedFrom = new Date(customFrom);
+                const parsedTo = new Date(customTo);
+                if (isNaN(parsedFrom.getTime()) || isNaN(parsedTo.getTime())) {
+                  Alert.alert('Invalid Date', 'Please use YYYY-MM-DD format.');
+                  return;
+                }
+                if (parsedTo < parsedFrom) {
+                  Alert.alert('Invalid Range', 'To Date cannot be before From Date.');
+                  return;
+                }
+                load({ pg: 1, date: 'custom', from: customFrom, to: customTo });
+                setShowDateRange(false);
+              }}
+              style={{
+                backgroundColor: C.accent,
+                borderRadius: 8,
+                paddingVertical: 8,
+                paddingHorizontal: 16,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4
+              }}
+            >
+              <MaterialCommunityIcons name="check" size={16} color="#fff" />
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>Apply</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       {/* ── List ─────────────────────────────────────────────── */}
       {loading && transactions.length === 0 ? (
@@ -1120,6 +1460,43 @@ const s = StyleSheet.create({
   chipTextActive:{ color: C.accentFg },
   chipDivider:   { width: 1, height: 20, backgroundColor: C.border, marginHorizontal: 4 },
 
+  // Date range panel
+  dateRangePanel: {
+    marginHorizontal: S.xl,
+    marginBottom: 10,
+    backgroundColor: C.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 0,
+  },
+  dateRangeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+  },
+  dateRangeSep: { height: 1, backgroundColor: C.border },
+  dateInput: {
+    flex: 1,
+    fontSize: 13,
+    color: C.ink,
+    fontWeight: '600',
+  },
+  dateApplyBtn: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: C.accent,
+    borderRadius: 10,
+    paddingVertical: 10,
+  },
+  dateApplyText: { fontSize: 13, fontWeight: '700', color: '#fff' },
+
   // Row
   row: {
     flexDirection: 'row', alignItems: 'center',
@@ -1145,7 +1522,30 @@ const s = StyleSheet.create({
   centreText:{ fontSize: 13, color: C.muted, textAlign: 'center', paddingHorizontal: 32 },
   retryBtn:  { paddingHorizontal: 20, paddingVertical: 9, borderRadius: R.sm, backgroundColor: C.accent, marginTop: 4 },
   retryText: { color: C.accentFg, fontWeight: '700', fontSize: 13 },
+
+  branchBar: { maxHeight: 44, marginBottom: S.sm },
+  branchBarContent: {
+    paddingHorizontal: S.lg,
+    paddingVertical: S.xs,
+    gap: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  branchChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: R.pill,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.card,
+  },
+  branchChipActive: { borderColor: C.accent, backgroundColor: C.accent },
+  branchChipText: { fontSize: 12, fontWeight: '600', color: C.muted },
+  branchChipTextActive: { color: C.accentFg, fontWeight: '700' },
 });
+
 
 // Receipt modal styles
 const m = StyleSheet.create({

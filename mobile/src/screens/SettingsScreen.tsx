@@ -25,6 +25,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RootState } from '../redux/store';
 import { logout, enableBiometric, disableBiometric } from '../redux/slices/authSlice';
+import { setStoreSettings } from '../redux/slices/settingsSlice';
 import ApiClient from '../services/ApiClient';
 import DatabaseService from '../services/DatabaseService';
 import { SyncManager } from '../services/SyncManager';
@@ -159,6 +160,8 @@ export default function SettingsScreen() {
   // Customer permissions (store-level)
   const [allowCashierAdd, setAllowCashierAdd] = useState(true);
   const [allowCashierEdit, setAllowCashierEdit] = useState(true);
+  const [customerMenuEnabled, setCustomerMenuEnabled] = useState(true);
+  const [supplierMenuEnabled, setSupplierMenuEnabled] = useState(true);
 
   // Biometric
   const [biometricAvailable, setBiometricAvailable] = useState(false);
@@ -310,8 +313,22 @@ export default function SettingsScreen() {
     try {
       const res: any = await ApiClient.get('/settings');
       const data = res?.data ?? res;
-      setAllowCashierAdd(data?.allow_cashier_add_customers ?? true);
-      setAllowCashierEdit(data?.allow_cashier_edit_customers ?? true);
+      const addCust = data?.allow_cashier_add_customers ?? true;
+      const editCust = data?.allow_cashier_edit_customers ?? true;
+      const custMenu = data?.customer_menu_enabled ?? true;
+      const suppMenu = data?.supplier_menu_enabled ?? true;
+
+      setAllowCashierAdd(addCust);
+      setAllowCashierEdit(editCust);
+      setCustomerMenuEnabled(custMenu);
+      setSupplierMenuEnabled(suppMenu);
+
+      dispatch(setStoreSettings({
+        allow_cashier_add_customers: addCust,
+        allow_cashier_edit_customers: editCust,
+        customer_menu_enabled: custMenu,
+        supplier_menu_enabled: suppMenu,
+      }));
     } catch (e) {
       console.warn('Store settings load error:', e);
     }
@@ -322,6 +339,12 @@ export default function SettingsScreen() {
     setAllowCashierAdd(next);
     try {
       await ApiClient.patch('/settings', { allow_cashier_add_customers: next });
+      dispatch(setStoreSettings({
+        allow_cashier_add_customers: next,
+        allow_cashier_edit_customers: allowCashierEdit,
+        customer_menu_enabled: customerMenuEnabled,
+        supplier_menu_enabled: supplierMenuEnabled,
+      }));
     } catch (e: any) {
       setAllowCashierAdd(!next);
       Alert.alert('Error', e?.response?.data?.message ?? 'Failed to update setting.');
@@ -333,10 +356,72 @@ export default function SettingsScreen() {
     setAllowCashierEdit(next);
     try {
       await ApiClient.patch('/settings', { allow_cashier_edit_customers: next });
+      dispatch(setStoreSettings({
+        allow_cashier_add_customers: allowCashierAdd,
+        allow_cashier_edit_customers: next,
+        customer_menu_enabled: customerMenuEnabled,
+        supplier_menu_enabled: supplierMenuEnabled,
+      }));
     } catch (e: any) {
       setAllowCashierEdit(!next);
       Alert.alert('Error', e?.response?.data?.message ?? 'Failed to update setting.');
     }
+  };
+
+  const handleToggleCustomerMenu = async () => {
+    const next = !customerMenuEnabled;
+    setCustomerMenuEnabled(next);
+    try {
+      await ApiClient.patch('/settings', { customer_menu_enabled: next });
+      dispatch(setStoreSettings({
+        allow_cashier_add_customers: allowCashierAdd,
+        allow_cashier_edit_customers: allowCashierEdit,
+        customer_menu_enabled: next,
+        supplier_menu_enabled: supplierMenuEnabled,
+      }));
+    } catch (e: any) {
+      setCustomerMenuEnabled(!next);
+      Alert.alert('Error', e?.response?.data?.message ?? 'Failed to update setting.');
+    }
+  };
+
+  const handleToggleSupplierMenu = async () => {
+    const next = !supplierMenuEnabled;
+    setSupplierMenuEnabled(next);
+    try {
+      await ApiClient.patch('/settings', { supplier_menu_enabled: next });
+      dispatch(setStoreSettings({
+        allow_cashier_add_customers: allowCashierAdd,
+        allow_cashier_edit_customers: allowCashierEdit,
+        customer_menu_enabled: customerMenuEnabled,
+        supplier_menu_enabled: next,
+      }));
+    } catch (e: any) {
+      setSupplierMenuEnabled(!next);
+      Alert.alert('Error', e?.response?.data?.message ?? 'Failed to update setting.');
+    }
+  };
+
+  const handleClearCache = () => {
+    Alert.alert(
+      'Clear Cache',
+      'Are you sure you want to clear cached data for this store? Unsynced transactions will NOT be affected.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear Cache',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await DatabaseService.clearCurrentStoreCache();
+              Alert.alert('Success', 'Store cache cleared successfully.');
+            } catch (e: any) {
+              Alert.alert('Error', e?.message || 'Failed to clear cache.');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const loadBizSettings = async () => {
@@ -1052,6 +1137,34 @@ export default function SettingsScreen() {
           </>
         )}
 
+        {/* ══════════ AUDIT LOGS (admin only) ══════════ */}
+        {isAdmin && (
+          <TouchableOpacity
+            style={[styles.card, styles.navRow, { marginBottom: 14 }]}
+            activeOpacity={0.75}
+            onPress={() => navigation.navigate('AuditLogs')}
+          >
+            <View style={[styles.navIcon, { backgroundColor: C.rose + '1A' }]}>
+              <MaterialCommunityIcons
+                name="shield-search"
+                size={20}
+                color={C.rose}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.navTitle}>Audit Logs</Text>
+              <Text style={styles.navSubtitle}>
+                Track all sensitive actions across the system
+              </Text>
+            </View>
+            <MaterialCommunityIcons
+              name="chevron-right"
+              size={20}
+              color={C.muted}
+            />
+          </TouchableOpacity>
+        )}
+
         {/* ══════════ ADMIN (super-admin only) ══════════ */}
         {isSuperAdmin && (
           <>
@@ -1083,6 +1196,32 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </>
         )}
+
+        {/* ══════════ CASH DRAWER & SHIFTS ══════════ */}
+        <TouchableOpacity
+          style={[styles.card, styles.navRow, { marginBottom: 14 }]}
+          activeOpacity={0.75}
+          onPress={() => navigation.navigate('CashShifts')}
+        >
+          <View style={[styles.navIcon, { backgroundColor: C.amber + '1A' }]}>
+            <MaterialCommunityIcons
+              name="cash-register"
+              size={20}
+              color={C.amber}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.navTitle}>Cash Drawer & Shifts</Text>
+            <Text style={styles.navSubtitle}>
+              Manage shift tracking and float reconciliation
+            </Text>
+          </View>
+          <MaterialCommunityIcons
+            name="chevron-right"
+            size={20}
+            color={C.muted}
+          />
+        </TouchableOpacity>
 
         {/* ══════════ STAFF MANAGEMENT ══════════ */}
         {canManageStaff && (
@@ -1269,6 +1408,49 @@ export default function SettingsScreen() {
                   </Text>
                 </View>
                 <Toggle value={allowCashierEdit} onValueChange={handleToggleCashierEdit} />
+              </View>
+            </View>
+          </>
+        )}
+
+        {/* ══════════ FEATURE MENU SETTINGS ══════════ */}
+        {canManageStaff && (
+          <>
+            <SectionHeader label="Feature Visibility (Cashiers)" />
+
+            <View style={[styles.card, { padding: 4, marginBottom: 14 }]}>
+              <View style={[styles.toggleRow, styles.rowDivider]}>
+                <View style={[styles.toggleIcon, { backgroundColor: C.accent + '1A' }]}>
+                  <MaterialCommunityIcons
+                    name="account-multiple"
+                    size={18}
+                    color={C.accent}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.toggleLabel}>Customer menu visible</Text>
+                  <Text style={styles.toggleDesc}>
+                    Show Customer menu and checkout selection for Cashiers
+                  </Text>
+                </View>
+                <Toggle value={customerMenuEnabled} onValueChange={handleToggleCustomerMenu} />
+              </View>
+
+              <View style={styles.toggleRow}>
+                <View style={[styles.toggleIcon, { backgroundColor: C.accent + '1A' }]}>
+                  <MaterialCommunityIcons
+                    name="truck-outline"
+                    size={18}
+                    color={C.accent}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.toggleLabel}>Supplier menu visible</Text>
+                  <Text style={styles.toggleDesc}>
+                    Show Supplier menu in sidebar/tabbar for Cashiers
+                  </Text>
+                </View>
+                <Toggle value={supplierMenuEnabled} onValueChange={handleToggleSupplierMenu} />
               </View>
             </View>
           </>
@@ -1731,15 +1913,7 @@ export default function SettingsScreen() {
             </Text>
           </View>
 
-          <View style={[styles.infoRow, styles.rowDivider]}>
-            <Text style={styles.infoLabel}>API URL</Text>
-            <Text
-              style={[styles.infoValue, { fontSize: 11, color: C.muted }]}
-              numberOfLines={1}
-            >
-              {API_BASE_URL}
-            </Text>
-          </View>
+
 
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Server Health</Text>
@@ -1790,6 +1964,27 @@ export default function SettingsScreen() {
               )}
             </TouchableOpacity>
           </View>
+        </View>
+
+        {/* ══════════ CACHE MANAGEMENT ══════════ */}
+        <SectionHeader label="Cache Management" />
+        <View style={[styles.card, { padding: 4, marginBottom: 14 }]}>
+          <TouchableOpacity
+            style={styles.toggleRow}
+            onPress={handleClearCache}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.toggleIcon, { backgroundColor: C.rose + '1A' }]}>
+              <MaterialCommunityIcons name="cached" size={18} color={C.rose} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.toggleLabel}>Clear Cached Data</Text>
+              <Text style={styles.toggleDesc}>
+                Clears cached products, suppliers, customers, and image assets for the current store. Your unsynced transactions will not be affected.
+              </Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={18} color={C.muted} />
+          </TouchableOpacity>
         </View>
 
         {/* ══════════ DANGER ZONE ══════════ */}

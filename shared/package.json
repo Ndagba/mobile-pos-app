@@ -1,0 +1,30 @@
+{
+  "name": "@jaypos/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Framework-agnostic TypeScript shared between the JayPOS desktop and (eventually) mobile apps: snake_case domain types, pure business logic (cart math, inventory rules), the offline_session_hash implementation, and platform-neutral service interfaces. No React / React Native / Next imports allowed here (see MONOREPO_STRATEGY.md R3).",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types/index.ts",
+    "./utils": "./src/utils/index.ts",
+    "./services/sync": "./src/services/sync/index.ts",
+    "./services/api": "./src/services/api/index.ts",
+    "./services/network": "./src/services/network/index.ts",
+    "./services/transactions": "./src/services/transactions/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "crypto-js": "^4.2.0"
+  },
+  "devDependencies": {
+    "@types/crypto-js": "^4.2.2",
+    "typescript": "^5.3.3",
+    "vitest": "^2.1.8"
+  }
+}

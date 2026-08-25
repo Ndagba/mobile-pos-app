@@ -1,4 +1,18 @@
 {
+  "name": "jaypos-workspace",
+  "private": true,
+  "version": "0.0.0",
+  "description": "JayPOS workspace root. Members: shared (@jaypos/shared) + desktop (Next.js PWA). backend/ and mobile/ remain standalone npm projects (see MONOREPO_STRATEGY.md).",
+  "workspaces": [
+    "shared",
+    "desktop"
+  ],
+  "scripts": {
+    "dev:desktop": "npm run dev --workspace desktop",
+    "build:desktop": "npm run build --workspace desktop",
+    "test:shared": "npm run test --workspace @jaypos/shared",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
   "devDependencies": {
     "docx": "^9.6.1"
   }

@@ -197,7 +197,20 @@ router.delete(
     }
     await assertSupplierAccess(req.params.id, user);
 
-    await prisma.supplier.delete({ where: { id: req.params.id } });
+    // A supplier referenced by a purchase order can't be hard-deleted
+    // (PurchaseOrder.supplier is onDelete: Restrict). Translate the raw Prisma
+    // FK violation (P2003) into a clear 409 instead of a generic 500.
+    try {
+      await prisma.supplier.delete({ where: { id: req.params.id } });
+    } catch (err: any) {
+      if (err?.code === 'P2003') {
+        throw new AppError(
+          409,
+          "This supplier has purchase orders and can't be deleted. Cancel or remove them first."
+        );
+      }
+      throw err;
+    }
     res.json({ status: 'success', message: 'Supplier deleted successfully' });
   })
 );

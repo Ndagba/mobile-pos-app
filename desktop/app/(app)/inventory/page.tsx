@@ -2,14 +2,16 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import type { Product, Category } from '@jaypos/shared';
+import type { Product, Category, Location } from '@jaypos/shared';
 import { useProducts } from '@/hooks/useProducts';
 import { useCategories } from '@/hooks/useCategories';
+import { useLocations } from '@/hooks/useLocations';
 import { useBranches } from '@/hooks/useBranches';
 import { useLowStock } from '@/hooks/useLowStock';
 import { useAdjustStock } from '@/hooks/useAdjustStock';
 import { useProductMutations } from '@/hooks/useProductMutations';
 import { useCategoryMutations } from '@/hooks/useCategoryMutations';
+import { useLocationMutations } from '@/hooks/useLocationMutations';
 import { useAuthStore } from '@/store/authStore';
 import { isAdmin } from '@/lib/roles';
 import { apiErrorMessage } from '@/lib/errors';
@@ -21,20 +23,22 @@ import { InventoryTabs, type InventoryTab } from '@/components/inventory/Invento
 import { BranchFilter } from '@/components/inventory/BranchFilter';
 import { ProductTable } from '@/components/inventory/ProductTable';
 import { CategoryList } from '@/components/inventory/CategoryList';
+import { LocationList } from '@/components/inventory/LocationList';
 import { LowStockList } from '@/components/inventory/LowStockList';
 import { StockAdjustModal } from '@/components/inventory/StockAdjustModal';
 import { MovementLedgerModal } from '@/components/inventory/MovementLedgerModal';
 import { ProductFormModal } from '@/components/inventory/ProductFormModal';
 import { CategoryFormModal } from '@/components/inventory/CategoryFormModal';
+import { LocationFormModal } from '@/components/inventory/LocationFormModal';
 
 /**
  * Inventory catalog (admin + manager; the section layout gates cashiers out).
  *
  * Product-centric, mirroring mobile: one `GET /products` load (branch- and
  * category-scoped server-side) drives the All / Products / Services tabs, with
- * search applied client-side over the loaded set. Categories and Low-Stock have
+ * search applied client-side over the loaded set. Categories, Locations and Low-Stock have
  * their own scoped queries. Rows expose adjust/ledger/edit/delete; creation and
- * category management hang off the header. Delete is admin-only in the UI (the
+ * category/location management hang off the header. Delete is admin-only in the UI (the
  * backend enforces it too).
  */
 export default function InventoryPage() {
@@ -55,19 +59,25 @@ export default function InventoryPage() {
   const [categoryFormOpen, setCategoryFormOpen] = useState(false);
   const [categoryFormTarget, setCategoryFormTarget] = useState<Category | null>(null);
   const [deleteCategory, setDeleteCategory] = useState<Category | null>(null);
+  const [locationFormOpen, setLocationFormOpen] = useState(false);
+  const [locationFormTarget, setLocationFormTarget] = useState<Location | null>(null);
+  const [deleteLocation, setDeleteLocation] = useState<Location | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const branchesQ = useBranches();
   const productsQ = useProducts({ categoryId, branchId, limit: 500 });
   const categoriesQ = useCategories({ branchId });
+  const locationsQ = useLocations({ branchId });
   const lowStockQ = useLowStock({ branchId });
   const quickRestock = useAdjustStock();
   const productMut = useProductMutations();
   const categoryMut = useCategoryMutations();
+  const locationMut = useLocationMutations();
 
   const branches = useMemo(() => branchesQ.data ?? [], [branchesQ.data]);
   const products = useMemo(() => productsQ.data ?? [], [productsQ.data]);
   const categories = useMemo(() => categoriesQ.data ?? [], [categoriesQ.data]);
+  const locations = useMemo(() => locationsQ.data ?? [], [locationsQ.data]);
   const lowStock = useMemo(() => lowStockQ.data ?? [], [lowStockQ.data]);
 
   const isProductTab = tab === 'all' || tab === 'products' || tab === 'services';
@@ -79,6 +89,7 @@ export default function InventoryPage() {
     products: products.filter((p) => p.item_type !== 'SERVICE').length,
     services: products.filter((p) => p.item_type === 'SERVICE').length,
     categories: categories.length,
+    locations: locations.length,
     'low-stock': lowStock.length,
   };
 
@@ -116,6 +127,14 @@ export default function InventoryPage() {
     setCategoryFormTarget(c);
     setCategoryFormOpen(true);
   };
+  const openCreateLocation = () => {
+    setLocationFormTarget(null);
+    setLocationFormOpen(true);
+  };
+  const openEditLocation = (loc: Location) => {
+    setLocationFormTarget(loc);
+    setLocationFormOpen(true);
+  };
 
   const confirmDeleteProduct = () => {
     if (!deleteProduct) return;
@@ -131,6 +150,14 @@ export default function InventoryPage() {
     categoryMut.remove.mutate(deleteCategory.id, {
       onSuccess: () => setDeleteCategory(null),
       onError: (e) => setDeleteError(apiErrorMessage(e, 'Could not delete the category.')),
+    });
+  };
+  const confirmDeleteLocation = () => {
+    if (!deleteLocation) return;
+    setDeleteError(null);
+    locationMut.remove.mutate(deleteLocation.id, {
+      onSuccess: () => setDeleteLocation(null),
+      onError: (e) => setDeleteError(apiErrorMessage(e, 'Could not delete the location.')),
     });
   };
 
@@ -160,6 +187,8 @@ export default function InventoryPage() {
           )}
           {tab === 'categories' ? (
             <Button onClick={openCreateCategory}>New category</Button>
+          ) : tab === 'locations' ? (
+            <Button onClick={openCreateLocation}>New location</Button>
           ) : (
             <Button onClick={openCreateProduct}>New product</Button>
           )}
@@ -260,6 +289,32 @@ export default function InventoryPage() {
             )}
           />
         )}
+        {tab === 'locations' && (
+          <LocationList
+            locations={locations}
+            loading={locationsQ.isLoading}
+            renderRowActions={(loc) => (
+              <div className="flex justify-end gap-1.5">
+                <Button size="sm" variant="ghost" onClick={() => openEditLocation(loc)}>
+                  Edit
+                </Button>
+                {admin && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => {
+                      setDeleteError(null);
+                      setDeleteLocation(loc);
+                    }}
+                  >
+                    Delete
+                  </Button>
+                )}
+              </div>
+            )}
+          />
+        )}
         {tab === 'low-stock' && (
           <LowStockList
             items={lowStock}
@@ -303,6 +358,7 @@ export default function InventoryPage() {
         onClose={() => setProductFormOpen(false)}
         product={productFormTarget}
         categories={categories}
+        locations={locations}
         canChooseBranch={canChooseBranch}
         branches={branches}
         defaultBranchId={branchId}
@@ -311,6 +367,14 @@ export default function InventoryPage() {
         open={categoryFormOpen}
         onClose={() => setCategoryFormOpen(false)}
         category={categoryFormTarget}
+        canChooseBranch={canChooseBranch}
+        branches={branches}
+        defaultBranchId={branchId}
+      />
+      <LocationFormModal
+        open={locationFormOpen}
+        onClose={() => setLocationFormOpen(false)}
+        location={locationFormTarget}
         canChooseBranch={canChooseBranch}
         branches={branches}
         defaultBranchId={branchId}
@@ -341,6 +405,27 @@ export default function InventoryPage() {
           </>
         }
         pending={categoryMut.remove.isPending}
+        error={deleteError}
+      />
+      <ConfirmDialog
+        open={deleteLocation !== null}
+        onClose={() => setDeleteLocation(null)}
+        onConfirm={confirmDeleteLocation}
+        title="Delete location"
+        message={
+          <>
+            Delete <span className="font-medium text-foreground">{deleteLocation?.name}</span>?
+            {deleteLocation?._count?.products ? (
+              <p className="mt-2 text-destructive font-medium">
+                This location is currently assigned to {deleteLocation._count.products} product(s).
+                Please reassign these products before deleting the location.
+              </p>
+            ) : (
+              ' Are you sure you want to delete this location?'
+            )}
+          </>
+        }
+        pending={locationMut.remove.isPending}
         error={deleteError}
       />
     </div>

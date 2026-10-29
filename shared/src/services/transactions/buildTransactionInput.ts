@@ -1,4 +1,4 @@
-import type { CartItem, PaymentMethod, TransactionInput, TransactionItem } from '../../types';
+import type { CartItem, PaymentMethod, SplitPaymentAllocations, TransactionInput, TransactionItem } from '../../types';
 import { calculateCartTotals } from '../../utils/cart';
 
 /**
@@ -16,6 +16,7 @@ export interface BuildTransactionContext {
   /** Flat store-level discount applied after tax. Defaults to 0. */
   discount_amount?: number;
   payment_method: PaymentMethod | string;
+  payment_splits?: SplitPaymentAllocations;
 }
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
@@ -60,6 +61,7 @@ export function buildTransactionInput(
     discount_amount: round2(totals.discount_amount),
     total_amount: round2(totals.total),
     payment_method: ctx.payment_method,
+    payment_splits: ctx.payment_splits,
     items: txItems,
   };
 }

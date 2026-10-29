@@ -4,7 +4,7 @@ export class PaymentService {
   static async processPayment(
     transactionId: string,
     amount: number,
-    method: 'cash' | 'card' | 'mobile_wallet',
+    method: 'cash' | 'card' | 'transfer',
     paymentDetails?: any
   ) {
     switch (method) {
@@ -12,7 +12,7 @@ export class PaymentService {
         return this.processCash(transactionId, amount);
       case 'card':
         return this.processCard(transactionId, amount, paymentDetails);
-      case 'mobile_wallet':
+      case 'transfer':
         return this.processWallet(transactionId, amount, paymentDetails);
       default:
         throw new AppError(400, 'Invalid payment method');
@@ -60,7 +60,7 @@ export class PaymentService {
     return {
       transaction_id: transactionId,
       status: 'completed',
-      method: 'mobile_wallet',
+      method: 'transfer',
       amount,
       reference: details.wallet_id,
       timestamp: new Date().toISOString()

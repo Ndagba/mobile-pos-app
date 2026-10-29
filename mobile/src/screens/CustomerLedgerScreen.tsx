@@ -509,10 +509,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  errorText: {
-    fontSize: 16,
-    color: C.muted,
-  },
   content: {
     flex: 1,
     paddingHorizontal: 12,

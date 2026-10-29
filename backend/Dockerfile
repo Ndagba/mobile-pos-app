@@ -5,7 +5,11 @@ WORKDIR /app
 
 COPY package*.json ./
 
-RUN npm ci
+RUN npm config set fetch-retries 5 \
+    && npm config set fetch-retry-factor 2 \
+    && npm config set fetch-retry-mintimeout 20000 \
+    && npm config set fetch-retry-maxtimeout 120000 \
+    && npm ci --include=dev --no-audit --no-fund
 
 COPY . .
 
@@ -22,7 +26,11 @@ RUN apk add --no-cache openssl
 
 COPY package*.json ./
 
-RUN npm ci --only=production
+RUN npm config set fetch-retries 5 \
+    && npm config set fetch-retry-factor 2 \
+    && npm config set fetch-retry-mintimeout 20000 \
+    && npm config set fetch-retry-maxtimeout 120000 \
+    && npm ci --omit=dev --no-audit --no-fund
 
 COPY --from=builder /app/dist ./dist
 COPY prisma ./prisma

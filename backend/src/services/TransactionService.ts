@@ -13,6 +13,7 @@ interface TransactionItemInput {
   discount_amount?: number;
   line_total: number;
   batch_id?: string;
+  labor_cost_override?: number;
 }
 
 interface CreateTransactionInput {
@@ -25,7 +26,8 @@ interface CreateTransactionInput {
   tax_amount: number;
   discount_amount: number;
   total_amount: number;
-  payment_method: 'cash' | 'card' | 'mobile_wallet';
+  payment_method: 'cash' | 'card' | 'transfer' | 'split' | string;
+  payment_splits?: { cash: number; card: number; transfer: number };
   items: TransactionItemInput[];
 }
 
@@ -50,6 +52,11 @@ export class TransactionService {
       const transactionId = uuidv4();
       const receiptNumber = `RCP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+      let paymentReference: string | null = null;
+      if (input.payment_method === 'split' && input.payment_splits) {
+        paymentReference = `Cash: ₦${Number(input.payment_splits.cash || 0).toLocaleString()}, Card: ₦${Number(input.payment_splits.card || 0).toLocaleString()}, Transfer: ₦${Number(input.payment_splits.transfer || 0).toLocaleString()}`;
+      }
+
       // Start transaction
       const transaction = await prisma.$transaction(async (tx) => {
         // Create transaction
@@ -67,15 +74,101 @@ export class TransactionService {
             total_amount: input.total_amount,
             payment_method: input.payment_method,
             payment_status: 'completed',
+            payment_reference: paymentReference,
+            payment_splits: input.payment_splits ? (input.payment_splits as any) : undefined,
             receipt_number: receiptNumber,
             is_sync_online: true,
             synced_at: new Date(),
             status: 'completed'
-          }
+          } as any
         });
 
         // Create transaction items and update inventory
         for (const item of input.items) {
+          if (!Number.isFinite(item.quantity) || item.quantity <= 0) {
+            throw new AppError(400, 'Transaction item quantity must be a positive number');
+          }
+          // Item type is always resolved from the authoritative catalog record.
+          const product = await tx.product.findUnique({
+            where: { id: item.product_id },
+            include: { inventory: true }
+          });
+          if (!product) {
+            throw new AppError(400, 'Transaction contains an unavailable product');
+          }
+
+          let itemCost = 0;
+
+          if (product.item_type === 'PRODUCT') {
+            // 1. Product Cost: Direct snapshot of cost_price
+            itemCost = Number(product.cost_price || 0);
+
+            if (!product.inventory || Number(product.inventory.quantity_on_hand) < item.quantity) {
+              throw new AppError(400, `Insufficient stock for ${product.name}`);
+            }
+            // Deduct physical stock
+            await tx.inventory.update({
+              where: { product_id: item.product_id },
+              data: { quantity_on_hand: { decrement: item.quantity } }
+            });
+
+            await tx.inventoryMovement.create({
+              data: {
+                store_id: input.store_id,
+                branch_id: input.branch_id,
+                product_id: item.product_id,
+                movement_type: 'sale',
+                quantity: -item.quantity,
+                reference_id: transactionId,
+                notes: 'Sale transaction',
+                user_id: input.user_id
+              }
+            });
+          } else if (product.item_type === 'SERVICE') {
+            // 2. Service Cost: Parts + Labor
+            const components = await tx.serviceComponent.findMany({
+              where: { service_id: item.product_id },
+              include: { product: { include: { inventory: true } } }
+            });
+
+            for (const comp of components) {
+              if (comp.component_type === 'PART' && comp.product_id) {
+                const part = comp.product;
+                if (!part) throw new AppError(400, `Part ${comp.product_id} not found for service ${product.name}`);
+
+                const partQtyNeeded = Number(comp.quantity) * item.quantity;
+                if (!part.inventory || Number(part.inventory.quantity_on_hand) < partQtyNeeded) {
+                  throw new AppError(400, `Insufficient stock for part ${part.name} needed for service ${product.name}`);
+                }
+
+                // Deduct part stock
+                await tx.inventory.update({
+                  where: { product_id: part.id },
+                  data: { quantity_on_hand: { decrement: partQtyNeeded } }
+                });
+
+                await tx.inventoryMovement.create({
+                  data: {
+                    store_id: input.store_id,
+                    branch_id: input.branch_id,
+                    product_id: part.id,
+                    movement_type: 'sale',
+                    quantity: -partQtyNeeded,
+                    reference_id: transactionId,
+                    notes: `Part used for service: ${product.name}`,
+                    user_id: input.user_id
+                  }
+                });
+
+                itemCost += Number(part.cost_price || 0) * Number(comp.quantity);
+              } else if (comp.component_type === 'LABOR') {
+                // Labor cost (use override if provided, else default)
+                const laborCost = item.labor_cost_override ?? Number(comp.default_labor_cost || 0);
+                itemCost += laborCost;
+              }
+            }
+          }
+
           await tx.transactionItem.create({
             data: {
               id: uuidv4(),
@@ -83,33 +176,11 @@ export class TransactionService {
               product_id: item.product_id,
               quantity: item.quantity,
               unit_price: item.unit_price,
+              cost_price: itemCost,
               tax_amount: item.tax_amount,
               discount_amount: item.discount_amount || 0,
               line_total: item.line_total,
               batch_id: item.batch_id
-            }
-          });
-
-          // Deduct from inventory
-          await tx.inventory.update({
-            where: { product_id: item.product_id },
-            data: {
-              quantity_on_hand: {
-                decrement: item.quantity
-              }
-            }
-          });
-
-          await tx.inventoryMovement.create({
-            data: {
-              store_id: input.store_id,
-              branch_id: input.branch_id,
-              product_id: item.product_id,
-              movement_type: 'sale',
-              quantity: BigInt(-item.quantity),
-              reference_id: transactionId,
-              notes: 'Sale transaction',
-              user_id: input.user_id
             }
           });
         }
@@ -247,6 +318,7 @@ export class TransactionService {
       paymentMethod?: string;
       status?: string;
       branchId?: string;
+      userId?: string;
     }
   ) {
     const where: any = { store_id: storeId };
@@ -267,6 +339,10 @@ export class TransactionService {
 
     if (filters?.branchId) {
       where.branch_id = filters.branchId;
+    }
+
+    if (filters?.userId) {
+      where.user_id = filters.userId;
     }
 
     const [transactions, total, sums] = await Promise.all([
@@ -314,7 +390,7 @@ export class TransactionService {
     try {
       const transaction = await prisma.transaction.findUnique({
         where: { id: transactionId },
-        include: { transaction_items: true }
+        include: { transaction_items: { include: { product: { select: { item_type: true } } } } }
       });
 
       if (!transaction) {
@@ -328,6 +404,7 @@ export class TransactionService {
       // Restore inventory
       await prisma.$transaction(async (tx) => {
         for (const item of transaction.transaction_items) {
+          if (item.product.item_type === 'SERVICE') continue;
           await tx.inventory.update({
             where: { product_id: item.product_id },
             data: {
@@ -343,7 +420,7 @@ export class TransactionService {
               branch_id: transaction.branch_id,
               product_id: item.product_id,
               movement_type: 'adjustment',
-              quantity: BigInt(item.quantity),
+              quantity: item.quantity,
               reference_id: transactionId,
               notes: 'Transaction voided',
               user_id: voidedByUserId
@@ -403,7 +480,7 @@ export class TransactionService {
     try {
       const transaction = await prisma.transaction.findUnique({
         where: { id: transactionId },
-        include: { transaction_items: true }
+        include: { transaction_items: { include: { product: { select: { item_type: true } } } } }
       });
 
       if (!transaction) {
@@ -416,6 +493,7 @@ export class TransactionService {
       await prisma.$transaction(async (tx) => {
         // Restore inventory for each item
         for (const item of transaction.transaction_items) {
+          if (item.product.item_type === 'SERVICE') continue;
           await tx.inventory.update({
             where: { product_id: item.product_id },
             data: { quantity_on_hand: { increment: item.quantity } }
@@ -427,7 +505,7 @@ export class TransactionService {
               branch_id: transaction.branch_id,
               product_id: item.product_id,
               movement_type: 'adjustment',
-              quantity: BigInt(item.quantity),
+              quantity: item.quantity,
               reference_id: transactionId,
               notes: 'Transaction refunded',
               user_id: refundedByUserId

@@ -41,6 +41,7 @@ interface TopProduct {
   transaction_count: number;
   total_cost?: number;
   profit?: number;
+  item_type?: 'PRODUCT' | 'SERVICE';
 }
 
 interface Branch {
@@ -397,6 +398,9 @@ export default function AnalyticsScreen() {
   const [customTo, setCustomTo] = useState('');
   const [showDateRange, setShowDateRange] = useState(false);
   const [sortBy, setSortBy] = useState<SortKey>('revenue');
+  // Product / Service / All filter for the sales KPIs, chart, and Top Products.
+  // Payment methods, staff, and discounts intentionally stay combined (tx-level).
+  const [itemTypeFilter, setItemTypeFilter] = useState<'ALL' | 'PRODUCT' | 'SERVICE'>('ALL');
   const [reportModal, setReportModal] = useState<ReportType | null>(null);
 
 
@@ -422,7 +426,7 @@ export default function AnalyticsScreen() {
       loadBranches();
       // Use ref so we always get the live branch even after a Modal focus event
       loadData(period, selectedBranchRef.current);
-    }, [period])
+    }, [period, itemTypeFilter])
   );
 
   const loadBranches = async () => {
@@ -452,9 +456,16 @@ export default function AnalyticsScreen() {
     }
   };
 
+  const handleItemTypeChange = (t: 'ALL' | 'PRODUCT' | 'SERVICE') => {
+    setItemTypeFilter(t);
+    // Pass the new value explicitly — setState is async, so loadData's closure
+    // would otherwise still read the previous filter.
+    loadData(period, selectedBranchRef.current, t);
+  };
 
 
-  const loadData = async (p: Period, branchId: string | null = null) => {
+
+  const loadData = async (p: Period, branchId: string | null = null, itype: 'ALL' | 'PRODUCT' | 'SERVICE' = itemTypeFilter) => {
     if (p === 'custom' && (!customFrom || !customTo)) {
       return; // Do not fetch until range is defined
     }
@@ -462,7 +473,7 @@ export default function AnalyticsScreen() {
     // Stamp this request; any response with an older stamp is discarded
     const myReq = ++reqId.current;
     setError(null);
-    const cacheKey = `analytics_${p}_${branchId ?? 'all'}`;
+    const cacheKey = `analytics_${p}_${branchId ?? 'all'}_${itype}`;
 
     // Stale-while-revalidate: render last-known data instantly, refresh below.
     const cached = await DatabaseService.getApiCache<any>(cacheKey);
@@ -482,9 +493,11 @@ export default function AnalyticsScreen() {
 
     const { dateFrom, dateTo } = getPeriodDates(p, customFrom, customTo);
     const bp = branchId ? `&branch_id=${encodeURIComponent(branchId)}` : '';
+    // Product/Service filter → re-slices every sales KPI server-side (see /analytics/sales).
+    const itp = itype !== 'ALL' ? `&item_type=${itype}` : '';
 
     const requests: Promise<any>[] = [
-      ApiClient.get(`/analytics/sales?dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}${bp}`),
+      ApiClient.get(`/analytics/sales?dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}${bp}${itp}`),
       ApiClient.get(`/analytics/top-products?period=${PERIOD_API_MAP[p]}&limit=10${bp}`),
       ApiClient.get(
         `/analytics/payments/methods?dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}${bp}`
@@ -622,6 +635,9 @@ export default function AnalyticsScreen() {
   // ── Stock verification items ───────────────────────────────────
   const soldMap = new Map(topProducts.map((p) => [p.id, p]));
   const stockVerifyItems = allProducts
+    // Services hold no physical stock — exclude them so they don't show a
+    // fabricated 0 on-hand / "out of stock" badge in the table and CSV.
+    .filter((p) => p.item_type !== 'SERVICE')
     .map((p) => ({
       id: p.id as string,
       name: p.name as string,
@@ -647,7 +663,13 @@ export default function AnalyticsScreen() {
     }));
 
   // ── Sorted products ───────────────────────────────────────────
-  const sortedProducts = [...topProducts].sort((a, b) => {
+  // Honour the Product/Service filter client-side (the endpoint returns item_type
+  // per row); 'ALL' shows everything. Legacy rows without item_type read as PRODUCT.
+  const filteredTopProducts =
+    itemTypeFilter === 'ALL'
+      ? topProducts
+      : topProducts.filter((p) => (p.item_type ?? 'PRODUCT') === itemTypeFilter);
+  const sortedProducts = [...filteredTopProducts].sort((a, b) => {
     if (sortBy === 'revenue') return b.total_revenue - a.total_revenue;
     if (sortBy === 'units') return b.total_sold - a.total_sold;
     return (b.profit ?? 0) - (a.profit ?? 0);
@@ -907,6 +929,22 @@ export default function AnalyticsScreen() {
             >
               <Text style={[s.periodBtnText, period === p && s.periodBtnTextActive]}>
                 {PERIOD_LABELS[p]}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* ── Item-type filter (All / Products / Services) — re-slices sales KPIs ── */}
+        <View style={s.periodContainer}>
+          {(['ALL', 'PRODUCT', 'SERVICE'] as const).map((t) => (
+            <TouchableOpacity
+              key={t}
+              style={[s.periodBtn, itemTypeFilter === t && s.periodBtnActive]}
+              onPress={() => handleItemTypeChange(t)}
+              activeOpacity={0.8}
+            >
+              <Text style={[s.periodBtnText, itemTypeFilter === t && s.periodBtnTextActive]}>
+                {t === 'ALL' ? 'All' : t === 'PRODUCT' ? 'Products' : 'Services'}
               </Text>
             </TouchableOpacity>
           ))}
@@ -1607,7 +1645,7 @@ export default function AnalyticsScreen() {
                   </Text>
                 </View>
 
-                {allProducts.length === 0 ? (
+                {stockVerifyItems.length === 0 ? (
                   <View style={s.emptyState}>
                     <MaterialCommunityIcons
                       name="clipboard-text-outline"

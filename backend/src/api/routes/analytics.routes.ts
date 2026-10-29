@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { catchAsync, AppError } from '../../utils/errorHandler';
@@ -22,6 +23,9 @@ router.get(
     const user = (req as any).user;
     const storeId: string | null = user?.storeId ?? null;
     const role: string = user?.role ?? '';
+    const userId: string = user?.userId ?? user?.id ?? '';
+    const isCashier = role === 'cashier';
+    const userSql = isCashier ? Prisma.sql`AND t.user_id = ${userId}` : Prisma.empty;
 
     // Determine effective branch IDs
     const branchIds = await getAuthorizedBranchIds(req);
@@ -36,8 +40,18 @@ router.get(
     // Build where clauses
     const locationFilter = branchWhere(branchIds, storeId);
 
-    const todayWhere: any = { status: 'completed', created_at: { gte: todayStart }, ...locationFilter };
-    const weekWhere: any  = { status: 'completed', created_at: { gte: weekStart }, ...locationFilter };
+    const todayWhere: any = {
+      status: 'completed',
+      created_at: { gte: todayStart },
+      ...(isCashier ? { user_id: userId } : {}),
+      ...locationFilter
+    };
+    const weekWhere: any  = {
+      status: 'completed',
+      created_at: { gte: weekStart },
+      ...(isCashier ? { user_id: userId } : {}),
+      ...locationFilter
+    };
 
     // ── Each query gets its own .catch() so one failure never kills the whole endpoint
     const [
@@ -52,17 +66,28 @@ router.get(
       prisma.transaction.count({ where: todayWhere })
         .catch(() => 0),
 
-      // Revenue from transaction items (not transaction total, for consistency)
-      prisma.$queryRaw<[{ revenue: number }]>`
-        SELECT COALESCE(SUM(ti.line_total), 0) AS revenue
+      // Revenue from transaction items (not transaction total, for consistency).
+      // Split product vs. service via item_type; LEFT JOIN Product so a deleted
+      // product never drops its revenue from the total.
+      prisma.$queryRaw<[{ revenue: number; product_revenue: number; service_revenue: number }]>`
+        SELECT
+          COALESCE(SUM(ti.line_total), 0) AS revenue,
+          COALESCE(SUM(ti.line_total) FILTER (WHERE p.item_type = 'PRODUCT'), 0) AS product_revenue,
+          COALESCE(SUM(ti.line_total) FILTER (WHERE p.item_type = 'SERVICE'), 0) AS service_revenue
         FROM "TransactionItem" ti
         JOIN "Transaction" t ON t.id = ti.transaction_id
+        LEFT JOIN "Product" p ON p.id = ti.product_id
         WHERE t.status = 'completed'
           AND t.created_at >= ${todayStart}
           AND t.branch_id = ANY(${branchIds})
+          ${userSql}
       `
-        .then(rows => ({ _sum: { total_amount: rows[0]?.revenue ?? 0 } }))
-        .catch(() => ({ _sum: { total_amount: null } })),
+        .then(rows => ({
+          _sum: { total_amount: rows[0]?.revenue ?? 0 },
+          product_revenue: rows[0]?.product_revenue ?? 0,
+          service_revenue: rows[0]?.service_revenue ?? 0,
+        }))
+        .catch(() => ({ _sum: { total_amount: null }, product_revenue: null, service_revenue: null })),
 
       prisma.transactionItem.aggregate({ where: { transaction: todayWhere }, _sum: { quantity: true } })
         .catch(() => ({ _sum: { quantity: null } })),
@@ -75,6 +100,7 @@ router.get(
         WHERE t.status = 'completed'
           AND t.created_at >= ${weekStart}
           AND t.branch_id = ANY(${branchIds})
+          ${userSql}
       `
         .then(rows => ({ _sum: { total_amount: rows[0]?.revenue ?? 0 } }))
         .catch(() => ({ _sum: { total_amount: null } })),
@@ -90,6 +116,7 @@ router.get(
         WHERE t.status = 'completed'
           AND t.created_at >= ${todayStart}
           AND t.branch_id = ANY(${branchIds})
+          ${userSql}
         GROUP BY t.payment_method
         ORDER BY revenue DESC
       `
@@ -111,6 +138,7 @@ router.get(
         JOIN "Product" p ON i.product_id = p.id
         WHERE i.quantity_on_hand <= i.low_stock_threshold
           AND p.is_active = true
+          AND p.item_type = 'PRODUCT'
           AND p.branch_id = ANY(${branchIds})
       `
         .then(rows => (rows as any)[0]?.count ?? 0).catch(() => 0),
@@ -118,7 +146,7 @@ router.get(
 
     // ── Recent transactions
     const recentTransactions: any[] = await prisma.transaction.findMany({
-      where: locationFilter,
+      where: isCashier ? { ...locationFilter, user_id: userId } : locationFilter,
       include: {
         user: { select: { first_name: true } },
         _count: { select: { transaction_items: true } }
@@ -143,6 +171,8 @@ router.get(
         WHERE t."created_at" >= ${todayStart}
           AND t.status = 'completed'
           AND t.branch_id = ANY(${branchIds})
+          AND p.item_type = 'PRODUCT'
+          ${userSql}
         GROUP BY p.id, p.name, p.sku
         ORDER BY total_revenue DESC
         LIMIT 5
@@ -162,6 +192,8 @@ router.get(
         WHERE t.status = 'completed'
           AND t.created_at >= ${todayStart}
           AND t.branch_id = ANY(${branchIds})
+          AND p.item_type = 'PRODUCT'
+          ${userSql}
       `;
       totalCost = Number(costRows[0]?.total_cost ?? 0);
     } catch (err: any) {
@@ -169,7 +201,10 @@ router.get(
     }
 
     const totalRevenue   = Number(revenueAgg._sum.total_amount ?? 0);
+    const productRevenue = Number((revenueAgg as any).product_revenue ?? 0);
+    const serviceRevenue = Number((revenueAgg as any).service_revenue ?? 0);
     const weekRevenue    = Number(weekRevenueAgg._sum.total_amount ?? 0);
+    // Units sold across all line items (products + services) — a sales metric, not stock movement.
     const totalItems     = Number(itemsAgg._sum.quantity ?? 0);
     const avgTransaction = transactionCount > 0
       ? +(totalRevenue / transactionCount).toFixed(2)
@@ -184,6 +219,8 @@ router.get(
       data: {
         transaction_count:  transactionCount,
         total_revenue:      totalRevenue,
+        product_revenue:    productRevenue,
+        service_revenue:    serviceRevenue,
         avg_transaction:    avgTransaction,
         total_items_sold:   totalItems,
         weekly_revenue:     weekRevenue,
@@ -267,18 +304,30 @@ router.get(
     const storeId: string | null = user?.storeId ?? null;
     const branchIds = await getAuthorizedBranchIds(req);
 
+    // Optional item-type filter (PRODUCT | SERVICE); absent/other value = both types.
+    // Whitelisted to a fixed set and passed as a bound param (never string-interpolated).
+    // When set, EVERY per-day metric below (revenue, transactions, items, cost, profit)
+    // reflects only that type, since the clause joins into the Product row.
+    const itemTypeRaw = String(req.query.item_type ?? '').toUpperCase();
+    const itemType = itemTypeRaw === 'PRODUCT' || itemTypeRaw === 'SERVICE' ? itemTypeRaw : null;
+    const itemTypeClause = itemType ? Prisma.sql`AND p.item_type = ${itemType}` : Prisma.empty;
+
     const from = new Date(dateFrom as string);
     const to   = new Date(dateTo as string);
 
-    // Use raw SQL so we can compute profit in a single join
+    // Use raw SQL so we can compute profit in a single join.
+    // Revenue is split product vs. service via item_type; cost/profit are
+    // product-only (services carry no COGS), so profit = revenue − product cost.
     const rows = await prisma.$queryRaw`
       SELECT
         DATE(t.created_at)                                                     AS date,
         CAST(COUNT(DISTINCT t.id)       AS INT)                               AS transactions,
         CAST(SUM(ti.line_total)         AS FLOAT)                             AS revenue,
+        CAST(COALESCE(SUM(ti.line_total) FILTER (WHERE p.item_type = 'PRODUCT'), 0) AS FLOAT) AS product_revenue,
+        CAST(COALESCE(SUM(ti.line_total) FILTER (WHERE p.item_type = 'SERVICE'), 0) AS FLOAT) AS service_revenue,
         CAST(SUM(ti.quantity)           AS INT)                               AS items_sold,
-        CAST(SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT)          AS total_cost,
-        CAST(SUM(ti.line_total) - SUM(ti.quantity * COALESCE(p.cost_price, 0)) AS FLOAT) AS profit
+        CAST(COALESCE(SUM(ti.quantity * COALESCE(p.cost_price, 0)) FILTER (WHERE p.item_type = 'PRODUCT'), 0) AS FLOAT) AS total_cost,
+        CAST(SUM(ti.line_total) - COALESCE(SUM(ti.quantity * COALESCE(p.cost_price, 0)) FILTER (WHERE p.item_type = 'PRODUCT'), 0) AS FLOAT) AS profit
       FROM "Transaction" t
       LEFT JOIN "TransactionItem" ti ON ti.transaction_id = t.id
       LEFT JOIN "Product" p ON p.id = ti.product_id
@@ -286,6 +335,7 @@ router.get(
         AND t.created_at >= ${from}
         AND t.created_at <= ${to}
         AND t.branch_id = ANY(${branchIds})
+        ${itemTypeClause}
       GROUP BY DATE(t.created_at)
       ORDER BY date ASC
     `;
@@ -293,12 +343,14 @@ router.get(
     res.json({
       status: 'success',
       data: (rows as any[]).map(row => ({
-        date:         row.date,
-        transactions: Number(row.transactions ?? 0),
-        revenue:      Number(row.revenue      ?? 0),
-        items_sold:   Number(row.items_sold   ?? 0),
-        total_cost:   Number(row.total_cost   ?? 0),
-        profit:       Number(row.profit       ?? 0)
+        date:            row.date,
+        transactions:    Number(row.transactions    ?? 0),
+        revenue:         Number(row.revenue          ?? 0),
+        product_revenue: Number(row.product_revenue  ?? 0),
+        service_revenue: Number(row.service_revenue  ?? 0),
+        items_sold:      Number(row.items_sold       ?? 0),
+        total_cost:      Number(row.total_cost       ?? 0),
+        profit:          Number(row.profit           ?? 0)
       }))
     });
   })
@@ -329,6 +381,7 @@ router.get(
         p.id,
         p.name,
         p.sku,
+        p.item_type,
         CAST(SUM(ti.quantity)    AS INT)   AS total_sold,
         CAST(SUM(ti.line_total)  AS FLOAT) AS total_revenue,
         CAST(COUNT(DISTINCT ti.transaction_id) AS INT) AS transaction_count,
@@ -341,7 +394,7 @@ router.get(
         AND t.created_at <= ${dateTo}
         AND t.status     = 'completed'
         AND t.branch_id  = ANY(${branchIds})
-      GROUP BY p.id, p.name, p.sku
+      GROUP BY p.id, p.name, p.sku, p.item_type
       ORDER BY total_revenue DESC
       LIMIT ${lim}
     `;
@@ -352,6 +405,7 @@ router.get(
         id:                p.id,
         name:              p.name,
         sku:               p.sku,
+        item_type:         p.item_type ?? 'PRODUCT',
         total_sold:        Number(p.total_sold        ?? 0),
         total_revenue:     Number(p.total_revenue     ?? 0),
         transaction_count: Number(p.transaction_count ?? 0),
@@ -377,6 +431,8 @@ router.get(
       : (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d; })();
     const to = dateTo ? new Date(dateTo as string) : new Date();
 
+    // Per-employee revenue is a transaction-level total; product and service
+    // line items are intentionally combined (an employee's sales include both).
     const rows = await prisma.$queryRaw`
       SELECT
         u.id,
@@ -430,6 +486,8 @@ router.get(
     const from = new Date(dateFrom as string);
     const to = new Date(dateTo as string);
 
+    // Payment-method totals are transaction-level; product and service revenue
+    // are intentionally combined (a single payment covers the whole basket).
     const results = await prisma.$queryRaw`
       SELECT
         t.payment_method,

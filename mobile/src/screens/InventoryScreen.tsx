@@ -23,7 +23,7 @@ import { useResponsive, responsiveSpacing, responsiveFontSize, responsiveGridCol
 import * as ImagePicker from 'expo-image-picker';
 
 // ─── Types ────────────────────────────────────────────────────
-type TabKey = 'products' | 'categories' | 'low-stock';
+type TabKey = 'all' | 'products' | 'services' | 'categories' | 'low-stock';
 
 interface Branch { id: string; name: string; is_active: boolean; }
 interface Category { id: string; name: string; description?: string; branch_id?: string; }
@@ -31,6 +31,7 @@ interface Product {
   id: string; name: string; sku: string; barcode?: string | null;
   marked_price: number; effective_price: number; cost_price?: number;
   tax_rate: number; category_id?: string; category?: Category;
+  item_type?: 'PRODUCT' | 'SERVICE';
   description?: string; branch_id?: string; unit?: string;
   inventory?: { quantity_on_hand: number; low_stock_threshold: number };
   image_url?: string | null;
@@ -80,6 +81,7 @@ const EMPTY_PRODUCT = {
   cost_price: '', tax_rate: '7.5', category_id: '',
   quantity: '', description: '', low_stock_threshold: '10',
   branch_id: '', unit: 'piece', image_url: '',
+  item_type: 'PRODUCT',
 };
 const EMPTY_CATEGORY = { name: '', description: '', branch_id: '' };
 
@@ -150,7 +152,7 @@ export default function InventoryScreen() {
   const gridColumns = responsiveGridColumns(deviceType);
   const minTouchTarget = responsiveMinTouchTarget(deviceType);
 
-  const [activeTab, setActiveTab] = useState<TabKey>('products');
+  const [activeTab, setActiveTab] = useState<TabKey>('all');
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -421,6 +423,8 @@ export default function InventoryScreen() {
       low_stock_threshold: storedThreshold ?? '10',
       ...(draft ?? {}),
       branch_id: defaultBranchId,
+      // Opening "New Service" from the Services tab pre-selects the Service type.
+      ...(activeTab === 'services' ? { item_type: 'SERVICE' } : {}),
     });
     setShowProductForm(true);
   };
@@ -470,6 +474,7 @@ export default function InventoryScreen() {
       branch_id: p.branch_id ?? '',
       unit: p.unit ?? 'piece',
       image_url: p.image_url ?? '',
+      item_type: p.item_type ?? 'PRODUCT',
     });
     setShowProductForm(true);
   };
@@ -506,22 +511,26 @@ export default function InventoryScreen() {
         tax_rate: parseFloat(productForm.tax_rate || '0'),
         category_id: productForm.category_id || undefined,
         description: productForm.description.trim() || undefined,
-        unit: productForm.unit || 'piece',
+        // Services don't track a unit; omit it (server keeps its 'piece' default).
+        unit: productForm.item_type === 'PRODUCT' ? (productForm.unit || 'piece') : undefined,
         image_url: productForm.image_url || null,
+        item_type: productForm.item_type,
       };
 
       if (editingProduct) {
         await ApiClient.patch(`/products/${editingProduct.id}`, payload);
-        const threshold = parseInt(productForm.low_stock_threshold || '0', 10);
-        if (!isNaN(threshold) && threshold > 0) {
+        const threshold = Number(productForm.low_stock_threshold || '0');
+        if (productForm.item_type === 'PRODUCT' && !isNaN(threshold) && threshold > 0) {
           try {
             await ApiClient.patch(`/inventory/${editingProduct.id}`, { low_stock_threshold: threshold });
           } catch {}
         }
         Alert.alert('Updated', `"${productForm.name}" updated`);
       } else {
-        payload.initial_quantity = parseInt(productForm.quantity || '0', 10);
-        payload.low_stock_threshold = Math.max(1, parseInt(productForm.low_stock_threshold || '10', 10));
+        if (productForm.item_type === 'PRODUCT') {
+          payload.initial_quantity = Math.max(0, Number(productForm.quantity || '0'));
+          payload.low_stock_threshold = Math.max(1, Number(productForm.low_stock_threshold || '10'));
+        }
         if (finalBranchId) payload.branch_id = finalBranchId;
         await ApiClient.post('/products', payload);
         // Product saved for real — discard any lingering draft.
@@ -578,7 +587,7 @@ export default function InventoryScreen() {
       return;
     }
     if (hasStockChange) {
-      const delta = parseInt(stockDelta, 10);
+      const delta = Number(stockDelta);
       const current = stockProduct?.inventory ? Number(stockProduct.inventory.quantity_on_hand) : 0;
       if (current + delta < 0) {
         Alert.alert('Validation', `Final stock cannot be negative. Current stock is ${current}, adjustment would make it ${current + delta}.`);
@@ -590,11 +599,11 @@ export default function InventoryScreen() {
     try {
       const body: any = {};
       if (hasStockChange) {
-        body.quantity = parseInt(stockDelta, 10);
+        body.quantity = Number(stockDelta);
         body.reason   = stockReason;
       }
       if (hasThreshChange) {
-        body.low_stock_threshold = parseInt(stockThreshold, 10);
+        body.low_stock_threshold = Number(stockThreshold);
       }
       await ApiClient.patch(`/inventory/${stockProduct!.id}`, body);
       Alert.alert('Updated', 'Inventory settings saved');
@@ -639,8 +648,15 @@ export default function InventoryScreen() {
       p.sku.toLowerCase().includes(q) ||
       (p.category?.name ?? '').toLowerCase().includes(q),
     );
+    // Item-type tab filter: Products = physical only, Services = services only,
+    // All = both. Legacy rows without item_type count as physical products.
+    if (activeTab === 'services') return list.filter(p => p.item_type === 'SERVICE');
+    if (activeTab === 'products') return list.filter(p => p.item_type !== 'SERVICE');
     return list;
   })();
+
+  // Product-type tabs share the product list/card and the tablet master-detail layout.
+  const isProductTab = activeTab === 'all' || activeTab === 'products' || activeTab === 'services';
 
   const filteredCategories = q
     ? categories.filter(c => c.name.toLowerCase().includes(q) || (c.description ?? '').toLowerCase().includes(q))
@@ -656,9 +672,10 @@ export default function InventoryScreen() {
     ? (categories.find(c => c.id === filterCategoryId)?.name ?? 'Unknown')
     : null;
 
-  // Stock value: always sum ALL loaded products regardless of category filter
+  // Physical inventory valuation uses cost price and excludes services.
   const totalStockValue = products.reduce((sum, p) => {
-    return sum + Number(p.inventory?.quantity_on_hand ?? 0) * Number(p.effective_price);
+    if (p.item_type === 'SERVICE') return sum;
+    return sum + Number(p.inventory?.quantity_on_hand ?? 0) * Number(p.cost_price ?? 0);
   }, 0);
 
   const stockValueLabel = branches.length > 1
@@ -670,18 +687,34 @@ export default function InventoryScreen() {
   // Category grid columns: 2 on phone, 3 on tablet, 4 on large tablet.
   const categoryColumns = gridColumns;
 
-  const tabData = activeTab === 'products' ? displayedProducts
+  const tabData = isProductTab ? displayedProducts
     : activeTab === 'categories' ? filteredCategories
     : filteredLowStock;
 
-  const tabRender = activeTab === 'products' ? renderProductCard
+  const tabRender = isProductTab ? renderProductCard
     : activeTab === 'categories' ? renderCategoryCard
     : renderLowStockCard;
 
   const tabKey = (item: any) => item.id ?? item.product_id ?? String(Math.random());
 
-  const tabCounts = {
-    products: displayedProducts.length,
+  // "All" counts every catalog item; Products/Services split it by type. These
+  // counts honour the active category/search filter (via a category+search base).
+  const countBase = (() => {
+    let list = filterCategoryId
+      ? products.filter(p => p.category_id === filterCategoryId)
+      : products;
+    if (q) list = list.filter(p =>
+      p.name.toLowerCase().includes(q) ||
+      p.sku.toLowerCase().includes(q) ||
+      (p.category?.name ?? '').toLowerCase().includes(q),
+    );
+    return list;
+  })();
+
+  const tabCounts: Record<TabKey, number> = {
+    all: countBase.length,
+    products: countBase.filter(p => p.item_type !== 'SERVICE').length,
+    services: countBase.filter(p => p.item_type === 'SERVICE').length,
     categories: categories.length,
     'low-stock': inventory.lowStockAlerts.length,
   };
@@ -714,7 +747,11 @@ export default function InventoryScreen() {
             {branches.length > 1 && item.branch_id && (
               <Text style={styles.rowMeta}>{getBranchName(item.branch_id)}</Text>
             )}
-            {qty !== null && (
+            {item.item_type === 'SERVICE' ? (
+              <View style={[styles.badge, { backgroundColor: C.violetBg }]}>
+                <Text style={[styles.badgeText, { color: C.accent }]}>Service</Text>
+              </View>
+            ) : qty !== null && (
               <View style={[styles.badge, { backgroundColor: stockBg, marginLeft: (branches.length > 1 && item.branch_id) ? 6 : 0 }]}>
                 <Text style={[styles.badgeText, { color: stockColor }]}>{qty} units</Text>
               </View>
@@ -723,14 +760,14 @@ export default function InventoryScreen() {
         </View>
 
         <View style={styles.rowActions}>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => { setLedgerProduct(item); setShowLedger(true); }}
+          {item.item_type !== 'SERVICE' && <TouchableOpacity style={styles.iconBtn} onPress={() => { setLedgerProduct(item); setShowLedger(true); }}
             hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
             <MaterialCommunityIcons name="history" size={18} color={C.muted} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => openStockAdjust(item)}
+          </TouchableOpacity>}
+          {item.item_type !== 'SERVICE' && <TouchableOpacity style={styles.iconBtn} onPress={() => openStockAdjust(item)}
             hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
             <MaterialCommunityIcons name="package-variant" size={18} color={C.accent} />
-          </TouchableOpacity>
+          </TouchableOpacity>}
           <TouchableOpacity style={styles.iconBtn} onPress={() => openEditProduct(item)}
             hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
             <MaterialCommunityIcons name="pencil-outline" size={18} color={C.muted} />
@@ -865,10 +902,17 @@ export default function InventoryScreen() {
   // Segmented tab control (Products / Categories / Low Stock) — shared between
   // the phone layout and the tablet master-detail layout so both can switch tabs.
   const renderSegmentBar = () => (
-    <View style={styles.segmentBar}>
-      {(['products', 'categories', 'low-stock'] as TabKey[]).map(tab => {
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.segmentBar}
+      contentContainerStyle={styles.segmentBarContent}
+    >
+      {(['all', 'products', 'services', 'categories', 'low-stock'] as TabKey[]).map(tab => {
         const labels: Record<TabKey, string> = {
+          all: 'All',
           products: 'Products',
+          services: 'Services',
           categories: 'Categories',
           'low-stock': 'Low Stock',
         };
@@ -894,12 +938,12 @@ export default function InventoryScreen() {
           </TouchableOpacity>
         );
       })}
-    </View>
+    </ScrollView>
   );
 
   // ─── Render ───────────────────────────────────────────────
   // Tablet master-detail layout
-  if (isTablet && activeTab === 'products') {
+  if (isTablet && isProductTab) {
     return (
       <View style={[styles.container, { paddingTop: insets.top, flexDirection: 'row' }]}>
         {/* ── Left panel: Product list ────────────────────────── */}
@@ -1013,7 +1057,14 @@ export default function InventoryScreen() {
                   </View>
                   <View style={[styles.rowBody, { flex: 1 }]}>
                     <Text style={[styles.rowTitle, { fontSize: 13 }]} numberOfLines={1}>{p.name}</Text>
-                    <Text style={[styles.rowMeta, { fontSize: 11 }]} numberOfLines={1}>{p.sku}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={[styles.rowMeta, { fontSize: 11 }]} numberOfLines={1}>{p.sku}</Text>
+                      {p.item_type === 'SERVICE' && (
+                        <View style={[styles.badge, { backgroundColor: C.violetBg }]}>
+                          <Text style={[styles.badgeText, { color: C.accent }]}>Service</Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
                   <Text style={[styles.rowPrice, { fontSize: 12 }]}>{naira(Number(p.effective_price))}</Text>
                 </TouchableOpacity>
@@ -1032,7 +1083,7 @@ export default function InventoryScreen() {
               {/* Product header */}
               <View style={{ marginBottom: spacing.lg }}>
                 <Text style={{ fontSize: fontSize.sm, color: C.muted, fontWeight: '600', marginBottom: 4 }}>
-                  PRODUCT
+                  {selectedProduct.item_type === 'SERVICE' ? 'SERVICE' : 'PRODUCT'}
                 </Text>
                 <Text style={{ fontSize: 22, fontWeight: '800', color: C.ink, marginBottom: 8 }}>
                   {selectedProduct.name}
@@ -1067,8 +1118,8 @@ export default function InventoryScreen() {
                 )}
               </View>
 
-              {/* Stock card */}
-              {selectedProduct.inventory && (
+              {/* Stock card — services hold no physical inventory */}
+              {selectedProduct.item_type !== 'SERVICE' && selectedProduct.inventory && (
                 <View style={{ backgroundColor: C.greenBg, borderRadius: R.lg, padding: spacing.md, marginBottom: spacing.lg, borderWidth: 1, borderColor: C.green + '30' }}>
                   <Text style={{ fontSize: fontSize.xs, color: C.green, fontWeight: '600', marginBottom: 4 }}>
                     STOCK ON HAND
@@ -1116,16 +1167,18 @@ export default function InventoryScreen() {
 
               {/* Action buttons */}
               <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-                <TouchableOpacity
-                  style={{ flex: 1, backgroundColor: C.accent, borderRadius: R.md, paddingVertical: spacing.md, alignItems: 'center' }}
-                  onPress={() => {
-                    openStockAdjust(selectedProduct);
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <MaterialCommunityIcons name="package-variant" size={18} color="#fff" style={{ marginBottom: 4 }} />
-                  <Text style={{ color: '#fff', fontWeight: '600', fontSize: 13 }}>Adjust Stock</Text>
-                </TouchableOpacity>
+                {selectedProduct.item_type !== 'SERVICE' && (
+                  <TouchableOpacity
+                    style={{ flex: 1, backgroundColor: C.accent, borderRadius: R.md, paddingVertical: spacing.md, alignItems: 'center' }}
+                    onPress={() => {
+                      openStockAdjust(selectedProduct);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <MaterialCommunityIcons name="package-variant" size={18} color="#fff" style={{ marginBottom: 4 }} />
+                    <Text style={{ color: '#fff', fontWeight: '600', fontSize: 13 }}>Adjust Stock</Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity
                   style={{ flex: 1, backgroundColor: C.card, borderRadius: R.md, paddingVertical: spacing.md, alignItems: 'center', borderWidth: 1, borderColor: C.border }}
                   onPress={() => openEditProduct(selectedProduct)}
@@ -1221,10 +1274,17 @@ export default function InventoryScreen() {
       )}
 
       {/* Segmented tab control — comes first */}
-      <View style={styles.segmentBar}>
-        {(['products', 'categories', 'low-stock'] as TabKey[]).map(tab => {
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.segmentBar}
+        contentContainerStyle={styles.segmentBarContent}
+      >
+        {(['all', 'products', 'services', 'categories', 'low-stock'] as TabKey[]).map(tab => {
           const labels: Record<TabKey, string> = {
+            all: 'All',
             products: 'Products',
+            services: 'Services',
             categories: 'Categories',
             'low-stock': 'Low Stock',
           };
@@ -1250,7 +1310,7 @@ export default function InventoryScreen() {
             </TouchableOpacity>
           );
         })}
-      </View>
+      </ScrollView>
 
       {/* Branch filter chips — admin only */}
       {branches.length > 1 && (
@@ -1303,7 +1363,7 @@ export default function InventoryScreen() {
       </View>
 
       {/* Category filter banner */}
-      {activeTab === 'products' && filterCategoryId && (
+      {isProductTab && filterCategoryId && (
         <View style={styles.filterBanner}>
           <MaterialCommunityIcons name="filter" size={14} color={C.accent} />
           <Text style={styles.filterText}>Filtered: {filterCategoryName}</Text>
@@ -1352,7 +1412,7 @@ export default function InventoryScreen() {
                   <Text style={styles.emptyText}>
                     {q
                       ? `No results for "${searchQuery}"`
-                      : activeTab === 'products' && filterCategoryId
+                      : isProductTab && filterCategoryId
                         ? `No products in "${filterCategoryName}"`
                         : 'Nothing here yet'}
                   </Text>
@@ -1362,7 +1422,7 @@ export default function InventoryScreen() {
                         Clear search
                       </Text>
                     </TouchableOpacity>
-                  ) : activeTab === 'products' && filterCategoryId ? (
+                  ) : isProductTab && filterCategoryId ? (
                     <TouchableOpacity onPress={() => setFilterCategoryId(null)} style={styles.emptyAction}>
                       <Text style={{ color: C.accent, fontWeight: '600', fontSize: 14 }}>
                         Show all products
@@ -1384,8 +1444,9 @@ export default function InventoryScreen() {
           />
           <Text style={styles.fabLabel}>
             {activeTab === 'categories' ? 'New Category'
-             : activeTab === 'products'  ? 'New Product'
-             : 'Refresh'}
+             : activeTab === 'low-stock' ? 'Refresh'
+             : activeTab === 'services'  ? 'New Service'
+             : 'New Product'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -1523,6 +1584,16 @@ export default function InventoryScreen() {
               onChangeText={v => setProductForm(f => ({ ...f, name: v }))}
               mode="outlined" style={styles.input} />
 
+            <Text style={styles.sectionLabel}>Item Type</Text>
+            <View style={[styles.row, { marginBottom: 12 }]}>
+              {(['PRODUCT', 'SERVICE'] as const).map(type => (
+                <TouchableOpacity key={type} onPress={() => setProductForm(f => ({ ...f, item_type: type }))}
+                  style={[styles.unitChip, { flex: 1, alignItems: 'center', marginRight: type === 'PRODUCT' ? 8 : 0 }, productForm.item_type === type && styles.unitChipActive]}>
+                  <Text style={[styles.unitChipText, productForm.item_type === type && styles.unitChipTextActive]}>{type === 'PRODUCT' ? 'Product' : 'Service'}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
             <TextInput label="SKU *" value={productForm.sku}
               onChangeText={v => setProductForm(f => ({ ...f, sku: v }))}
               mode="outlined" style={styles.input} autoCapitalize="characters" />
@@ -1581,60 +1652,64 @@ export default function InventoryScreen() {
                 right={<TextInput.Affix text="%" />} />
             </View>
 
-            <Text style={styles.sectionLabel}>Unit</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={{ marginBottom: 12 }}
-              contentContainerStyle={{ gap: 8, paddingVertical: 2 }}
-            >
-              {UNIT_OPTIONS.map((u) => {
-                const active = (productForm.unit || 'piece') === u;
-                return (
-                  <TouchableOpacity
-                    key={u}
-                    onPress={() => setProductForm(f => ({ ...f, unit: u }))}
-                    activeOpacity={0.75}
-                    style={[
-                      styles.unitChip,
-                      active && styles.unitChipActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.unitChipText,
-                        active && styles.unitChipTextActive,
-                      ]}
-                    >
-                      {u}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+            {productForm.item_type === 'PRODUCT' && (
+              <>
+                <Text style={styles.sectionLabel}>Unit</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={{ marginBottom: 12 }}
+                  contentContainerStyle={{ gap: 8, paddingVertical: 2 }}
+                >
+                  {UNIT_OPTIONS.map((u) => {
+                    const active = (productForm.unit || 'piece') === u;
+                    return (
+                      <TouchableOpacity
+                        key={u}
+                        onPress={() => setProductForm(f => ({ ...f, unit: u }))}
+                        activeOpacity={0.75}
+                        style={[
+                          styles.unitChip,
+                          active && styles.unitChipActive,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.unitChipText,
+                            active && styles.unitChipTextActive,
+                          ]}
+                        >
+                          {u}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </>
+            )}
 
-            {!editingProduct && (
+            {productForm.item_type === 'PRODUCT' && !editingProduct && (
               <TextInput
                 label={`Initial Stock (${productForm.unit || 'piece'})`}
                 value={productForm.quantity}
                 onChangeText={v => setProductForm(f => ({ ...f, quantity: v }))}
-                mode="outlined" keyboardType="number-pad" style={styles.input}
+                mode="outlined" keyboardType="decimal-pad" style={styles.input}
               />
             )}
 
-            <TextInput
+            {productForm.item_type === 'PRODUCT' && <TextInput
               label="Low Stock Alert Threshold (units)"
               value={productForm.low_stock_threshold}
-              onChangeText={v => setProductForm(f => ({ ...f, low_stock_threshold: v.replace(/[^0-9]/g, '') }))}
-              mode="outlined" keyboardType="number-pad" style={styles.input}
+              onChangeText={v => setProductForm(f => ({ ...f, low_stock_threshold: v.replace(/[^0-9.]/g, '') }))}
+              mode="outlined" keyboardType="decimal-pad" style={styles.input}
               left={<TextInput.Icon icon="bell-alert-outline" />}
               right={<TextInput.Affix text="units" />}
-            />
-            <HelperText type="info" style={{ marginTop: -8, marginBottom: 4 }}>
+            />}
+            {productForm.item_type === 'PRODUCT' && <HelperText type="info" style={{ marginTop: -8, marginBottom: 4 }}>
               {editingProduct
                 ? "Overrides this product's alert level independently of the global setting."
                 : 'Defaults to the store global setting — you can override it here.'}
-            </HelperText>
+            </HelperText>}
 
             <Text style={styles.sectionLabel}>
               Category {!editingProduct && '*'}
@@ -1869,22 +1944,26 @@ const styles = StyleSheet.create({
 
   // ── Segmented tabs ───────────────────────────────────────────
   segmentBar: {
-    flexDirection: 'row',
     marginHorizontal: S.lg,
     backgroundColor: C.card,
     borderRadius: R.sm,
-    padding: 4,
     marginBottom: S.sm,
     borderWidth: 1,
     borderColor: C.border,
+    flexGrow: 0,
+  },
+  segmentBarContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 4,
     gap: 3,
   },
   segment: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 8,
+    paddingHorizontal: 14,
     borderRadius: R.xs,
     gap: 4,
   },

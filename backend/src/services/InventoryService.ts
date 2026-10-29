@@ -51,12 +51,12 @@ export class InventoryService {
         sku: inv.product.sku,
         quantity_on_hand: inv.quantity_on_hand,
         quantity_reserved: inv.quantity_reserved,
-        available_quantity: inv.quantity_on_hand - inv.quantity_reserved,
+        available_quantity: Number(inv.quantity_on_hand) - Number(inv.quantity_reserved),
         low_stock_threshold: inv.low_stock_threshold,
         status:
-          inv.quantity_on_hand - inv.quantity_reserved <= 0
+          Number(inv.quantity_on_hand) - Number(inv.quantity_reserved) <= 0
             ? 'OUT_OF_STOCK'
-            : inv.quantity_on_hand - inv.quantity_reserved <= inv.low_stock_threshold
+            : Number(inv.quantity_on_hand) - Number(inv.quantity_reserved) <= Number(inv.low_stock_threshold)
               ? 'LOW'
               : 'IN_STOCK'
       }));
@@ -115,6 +115,7 @@ export class InventoryService {
             JOIN "Product" p ON i.product_id = p.id
             WHERE i.quantity_on_hand <= i.low_stock_threshold
               AND p.is_active = true
+              AND p.item_type = 'PRODUCT'
               AND p.branch_id = ANY(${branchIds})
             ORDER BY i.quantity_on_hand ASC
             LIMIT 100
@@ -133,6 +134,7 @@ export class InventoryService {
             JOIN "Branch"  b ON p.branch_id  = b.id
             WHERE i.quantity_on_hand <= i.low_stock_threshold
               AND p.is_active = true
+              AND p.item_type = 'PRODUCT'
               AND b.store_id  = ${storeId}
             ORDER BY i.quantity_on_hand ASC
             LIMIT 100
@@ -150,6 +152,7 @@ export class InventoryService {
             JOIN "Product" p ON i.product_id = p.id
             WHERE i.quantity_on_hand <= i.low_stock_threshold
               AND p.is_active = true
+              AND p.item_type = 'PRODUCT'
             ORDER BY i.quantity_on_hand ASC
             LIMIT 100
           `;
@@ -177,19 +180,91 @@ export class InventoryService {
     }
   }
 
-  static async getExpiringBatches(daysUntilExpiry: number = 7) {
+  static async getExpiringBatches(daysUntilExpiry: number = 7, status: string = 'expiring', branchIds?: string[]) {
     try {
-      const expiryDate = new Date();
-      expiryDate.setDate(expiryDate.getDate() + daysUntilExpiry);
+      const isExpiredQuery = status === 'expired';
+      const now = new Date();
+      let whereClause: any = {};
 
-      const batches = await prisma.batchTracking.findMany({
-        where: {
+      if (isExpiredQuery) {
+        whereClause = {
+          OR: [
+            { is_expired: true },
+            { expiry_date: { lt: now } }
+          ]
+        };
+      } else {
+        const expiryDate = new Date();
+        expiryDate.setDate(expiryDate.getDate() + daysUntilExpiry);
+        whereClause = {
           is_expired: false,
           expiry_date: {
             lte: expiryDate,
-            gte: new Date()
+            gte: now
+          }
+        };
+      }
+
+      if (branchIds && branchIds.length > 0) {
+        whereClause.product = { branch_id: { in: branchIds } };
+      }
+
+      const batches = await prisma.batchTracking.findMany({
+        where: whereClause,
+        include: {
+          product: {
+            select: {
+              name: true,
+              sku: true
+            }
           }
         },
+        orderBy: { expiry_date: isExpiredQuery ? 'desc' : 'asc' }
+      });
+
+      return batches.map((batch) => {
+        const daysLeft = Math.floor(
+          (batch.expiry_date.getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+        );
+        const urgency = isExpiredQuery || batch.is_expired || daysLeft < 0
+          ? 'EXPIRED'
+          : daysLeft <= 1
+            ? 'CRITICAL'
+            : daysLeft <= 3
+              ? 'HIGH'
+              : 'MEDIUM';
+
+        return {
+          batch_id: batch.id,
+          product_name: batch.product.name,
+          sku: batch.product.sku,
+          batch_number: batch.batch_number,
+          manufactured_date: batch.manufactured_date,
+          expiry_date: batch.expiry_date,
+          quantity: batch.quantity,
+          days_until_expiry: daysLeft,
+          urgency
+        };
+      });
+    } catch (error) {
+      logger.error({
+        event: 'expiring_batches_fetch_failed',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      throw new AppError(500, 'Failed to fetch expiring batches');
+    }
+  }
+
+  static async getBatches(productId?: string, branchIds?: string[]) {
+    try {
+      const where: any = {};
+      if (productId) where.product_id = productId;
+      if (branchIds && branchIds.length > 0) {
+        where.product = { branch_id: { in: branchIds } };
+      }
+
+      return await prisma.batchTracking.findMany({
+        where,
         include: {
           product: {
             select: {
@@ -200,36 +275,21 @@ export class InventoryService {
         },
         orderBy: { expiry_date: 'asc' }
       });
-
-      return batches.map((batch) => ({
-        batch_id: batch.id,
-        product_name: batch.product.name,
-        sku: batch.product.sku,
-        batch_number: batch.batch_number,
-        manufactured_date: batch.manufactured_date,
-        expiry_date: batch.expiry_date,
-        quantity: batch.quantity,
-        days_until_expiry: Math.floor(
-          (batch.expiry_date.getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-        ),
-        urgency:
-          Math.floor((batch.expiry_date.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) <= 1
-            ? 'CRITICAL'
-            : Math.floor((batch.expiry_date.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) <= 3
-              ? 'HIGH'
-              : 'MEDIUM'
-      }));
     } catch (error) {
       logger.error({
-        event: 'expiring_batches_fetch_failed',
+        event: 'batches_fetch_failed',
         error: error instanceof Error ? error.message : 'Unknown error'
       });
-      throw new AppError(500, 'Failed to fetch expiring batches');
+      throw new AppError(500, 'Failed to fetch batches');
     }
   }
 
   static async updateStock(productId: string, quantity: number, reason: string) {
     try {
+      if (!Number.isFinite(quantity)) throw new AppError(400, 'quantity must be a valid number');
+      const product = await prisma.product.findUnique({ where: { id: productId }, select: { item_type: true } });
+      if (!product) throw new AppError(404, 'Product not found');
+      if (product.item_type === 'SERVICE') throw new AppError(400, 'Services do not have physical inventory');
       const inventory = await prisma.inventory.findUnique({
         where: { product_id: productId }
       });
@@ -276,6 +336,9 @@ export class InventoryService {
 
   static async updateThreshold(productId: string, threshold: number) {
     try {
+      const product = await prisma.product.findUnique({ where: { id: productId }, select: { item_type: true } });
+      if (!product) throw new AppError(404, 'Product not found');
+      if (product.item_type === 'SERVICE') throw new AppError(400, 'Services do not have low-stock thresholds');
       const inventory = await prisma.inventory.findUnique({
         where: { product_id: productId }
       });
@@ -286,7 +349,7 @@ export class InventoryService {
 
       const updated = await prisma.inventory.update({
         where: { product_id: productId },
-        data: { low_stock_threshold: BigInt(Math.round(threshold)) }
+        data: { low_stock_threshold: threshold }
       });
 
       const storeId = await this.getStoreIdForProduct(productId);
@@ -318,6 +381,9 @@ export class InventoryService {
     warehouseLocation?: string
   ) {
     try {
+      const product = await prisma.product.findUnique({ where: { id: productId }, select: { item_type: true } });
+      if (!product) throw new AppError(404, 'Product not found');
+      if (product.item_type === 'SERVICE') throw new AppError(400, 'Services cannot have batch tracking');
       if (expiryDate <= manufacturedDate) {
         throw new AppError(400, 'Expiry date must be after manufactured date');
       }
@@ -415,6 +481,8 @@ export class InventoryService {
   static async getInventoryTurnover(storeId: string, dateFrom: Date, dateTo: Date) {
     try {
       // Tables use quoted PascalCase names as created by Prisma migrations.
+      // Services are excluded (AND p.item_type = 'PRODUCT'): they hold no
+      // inventory, so a turnover ratio is meaningless for them.
       const result = await prisma.$queryRaw`
         SELECT
           p.id,
@@ -432,6 +500,7 @@ export class InventoryService {
         WHERE t.created_at >= ${dateFrom}
           AND t.created_at <= ${dateTo}
           AND t.store_id = ${storeId}
+          AND p.item_type = 'PRODUCT'
         GROUP BY p.id, p.name, p.sku
         ORDER BY total_sold DESC
       `;

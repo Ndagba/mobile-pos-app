@@ -1,7 +1,4 @@
-version: '3.8'
-
 services:
-  # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
     container_name: mobilepos_db
@@ -14,12 +11,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U pos_user" ]
+      test: [ "CMD-SHELL", "pg_isready -U pos_user -d mobilepos" ]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # Redis Cache
   redis:
     image: redis:7-alpine
     container_name: mobilepos_redis
@@ -31,8 +27,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # API Server
-  # pgAdmin (Database UI)
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: mobilepos_pgadmin
@@ -43,13 +37,14 @@ services:
       - "5050:80"
     depends_on:
       - postgres
+
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: mobilepos_api
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       DATABASE_URL: postgresql://pos_user:secure_password@postgres:5432/mobilepos
       REDIS_URL: redis://redis:6379
@@ -65,7 +60,10 @@ services:
 
 volumes:
   postgres_data:
+    external: true
+    name: pos_mobile_app_postgres_data
 
 networks:
   default:
     name: mobilepos_network
+    external: true

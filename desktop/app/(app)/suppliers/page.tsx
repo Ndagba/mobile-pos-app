@@ -208,7 +208,8 @@ export default function SuppliersPage() {
         message={
           <>
             Delete <span className="font-medium text-foreground">{deleteTarget?.name}</span>? This
-            also removes its invoices and payments and cannot be undone.
+            also removes its invoices and payments and cannot be undone. A supplier linked to any
+            purchase order can&apos;t be deleted — cancel or remove those first.
           </>
         }
         pending={remove.isPending}

@@ -26,7 +26,7 @@ interface StockCount {
 interface StockCountItem {
   id: string;
   product_id: string;
-  product: { name: string; sku: string | null; category: { name: string } | null };
+  product: { name: string; sku: string | null; barcode?: string | null; category: { name: string } | null };
   system_quantity: number;
   physical_quantity: number | null;
   variance: number | null;

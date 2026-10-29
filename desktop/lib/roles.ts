@@ -30,3 +30,12 @@ export function canManageInventory(user: RoleBearer): boolean {
 export function canManageSuppliers(user: RoleBearer): boolean {
   return user?.role === 'admin' || user?.role === 'manager' || !!user?.is_super_admin;
 }
+
+/**
+ * Admin or manager: may raise purchase orders and receive stock. Cashiers may
+ * not. The backend gates every PO write (create/edit/receive/delete) to
+ * admin+manager; this only decides what the Purchasing section shows.
+ */
+export function canManagePurchasing(user: RoleBearer): boolean {
+  return user?.role === 'admin' || user?.role === 'manager' || !!user?.is_super_admin;
+}

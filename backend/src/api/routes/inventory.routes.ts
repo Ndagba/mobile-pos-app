@@ -49,13 +49,38 @@ router.get(
   })
 );
 
-// Get expiring batches
+// Get expiring/expired batches
 router.get(
   '/expiring',
   catchAsync(async (req: Request, res: Response) => {
-    const { days = '7' } = req.query;
+    const { days = '7', status = 'expiring' } = req.query;
+    const branchIds = await getAuthorizedBranchIds(req);
 
-    const batches = await InventoryService.getExpiringBatches(parseInt(days as string));
+    const batches = await InventoryService.getExpiringBatches(
+      parseInt(days as string, 10),
+      status as string,
+      branchIds
+    );
+
+    res.json({
+      status: 'success',
+      data: batches,
+      count: batches.length
+    });
+  })
+);
+
+// Get all batches (optionally filtered by product_id)
+router.get(
+  '/batches',
+  catchAsync(async (req: Request, res: Response) => {
+    const { product_id } = req.query;
+    const branchIds = await getAuthorizedBranchIds(req);
+
+    const batches = await InventoryService.getBatches(
+      product_id as string | undefined,
+      branchIds
+    );
 
     res.json({
       status: 'success',
@@ -81,7 +106,7 @@ router.patch(
       throw new AppError(400, 'threshold must be a non-negative number');
     }
 
-    const thresholdBigInt = BigInt(Math.round(parsed));
+    const thresholdValue = parsed;
 
     // Scope update to products owned by this store only.
     // Products are linked to branches; branches carry the store_id.
@@ -92,7 +117,7 @@ router.patch(
     if (storeId) {
       const result: any = await prisma.$executeRaw`
         UPDATE "Inventory"
-        SET    low_stock_threshold = ${thresholdBigInt}
+        SET    low_stock_threshold = ${thresholdValue}
         WHERE  product_id IN (
           SELECT p.id
           FROM   "Product" p
@@ -105,7 +130,7 @@ router.patch(
       // Super-admin / no store context — update everything
       const result = await prisma.inventory.updateMany({
         where: {},
-        data: { low_stock_threshold: thresholdBigInt },
+        data: { low_stock_threshold: thresholdValue },
       });
       updatedCount = result.count;
     }

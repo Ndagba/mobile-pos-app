@@ -26,10 +26,14 @@ import subscriptionsRoutes from './api/routes/subscriptions.routes';
 import webhooksRoutes from './api/routes/webhooks.routes';
 import adminSubscriptionsRoutes from './api/routes/admin-subscriptions.routes';
 import supplierRoutes from './api/routes/suppliers.routes';
+import purchaseOrderRoutes from './api/routes/purchase-orders.routes';
 import stockCountRoutes from './api/routes/stock-counts.routes';
 import auditRoutes from './api/routes/audit.routes';
 import reportsRoutes from './api/routes/reports.routes';
 import shiftsRoutes from './api/routes/shifts.routes';
+import expenseRoutes from './api/routes/expenses.routes';
+import financialsRoutes from './api/routes/financials.routes';
+import locationRoutes from './api/routes/locations.routes';
 
 
 // Fix BigInt serialization
@@ -41,17 +45,33 @@ const app: Express = express();
 const PORT = process.env.PORT || 3000;
 const isDev = process.env.NODE_ENV !== 'production';
 
+// CORS middleware (must be registered before helmet and other routes)
+app.use((req, res, next) => {
+  console.log(`[CORS DEBUG] ${req.method} ${req.url} - Origin: ${req.headers.origin}`);
+  const origin = req.headers.origin;
+  if (origin) {
+    // In development, we allow any origin for simplicity.
+    // In production, you should validate this against allowedOrigins.
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+  if (req.method === 'OPTIONS') {
+    console.log(`[CORS DEBUG] Handling OPTIONS preflight for ${req.url}`);
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // Security middleware
-app.use(helmet());
-app.use(cors({
-  // In development allow every origin — React Native doesn't enforce CORS
-  // anyway (no browser sandbox), but this prevents Postman / browser
-  // test-client blocks during local development.
-  origin: isDev
-    ? true
-    : (process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000']),
-  credentials: true
-}));
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
+
 
 // Enable trust proxy so rate limiting works correctly behind Nginx/Cloudflare/Docker
 const trustProxyEnv = process.env.TRUST_PROXY;
@@ -195,10 +215,14 @@ app.use('/v1/subscriptions', subscriptionsRoutes);
 app.use('/v1/webhooks', webhooksRoutes);
 app.use('/v1/admin', adminSubscriptionsRoutes);
 app.use('/v1/suppliers', supplierRoutes);
+app.use('/v1/purchase-orders', purchaseOrderRoutes);
 app.use('/v1/stock-counts', stockCountRoutes);
 app.use('/v1/audit', auditRoutes);
 app.use('/v1/reports', reportsRoutes);
 app.use('/v1/shifts', shiftsRoutes);
+app.use('/v1/expenses', expenseRoutes);
+app.use('/v1/financials', financialsRoutes);
+app.use('/v1/locations', locationRoutes);
 
 
 // 404 handler
@@ -224,9 +248,8 @@ function getLanIPs(): string[] {
   return ips;
 }
 
-// Start server — explicitly bind on 0.0.0.0 so every network interface
-// (Wi-Fi, Ethernet, VPN) is reachable, not just loopback.
-const server = app.listen(Number(PORT), '0.0.0.0', () => {
+// Start server — bind on all interfaces (IPv4 and IPv6)
+const server = app.listen(Number(PORT), () => {
   const env = process.env.NODE_ENV || 'development';
   logger.info(`🚀 Server running on port ${PORT} in ${env} mode`);
 

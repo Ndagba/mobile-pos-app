@@ -25,6 +25,11 @@ export interface ReceiptData {
   discount_amount: number;
   total: number;
   paymentLabel: string;
+  paymentSplits?: {
+    cash: number;
+    card: number;
+    transfer: number;
+  };
   customerName?: string;
   storeLabel: string;
   branchLabel: string;
@@ -76,6 +81,13 @@ export function ReceiptModal({ data, onClose }: { data: ReceiptData | null; onCl
           <p>Date: {data.at.toLocaleString()}</p>
           {data.customerName && <p>Customer: {data.customerName}</p>}
           <p>Payment: {data.paymentLabel}</p>
+          {data.paymentSplits && (
+            <div className="pl-2 space-y-0.5 text-muted-foreground">
+              {data.paymentSplits.cash > 0 && <p>• Cash: {naira(data.paymentSplits.cash)}</p>}
+              {data.paymentSplits.card > 0 && <p>• Card: {naira(data.paymentSplits.card)}</p>}
+              {data.paymentSplits.transfer > 0 && <p>• Transfer: {naira(data.paymentSplits.transfer)}</p>}
+            </div>
+          )}
 
           <div className="my-2 border-t border-dashed" />
           {data.lines.map((l, i) => (

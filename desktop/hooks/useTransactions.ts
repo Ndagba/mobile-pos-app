@@ -34,6 +34,7 @@ export interface TransactionFilters {
   dateTo?: string;
   paymentMethod?: string;
   status?: string;
+  userId?: string;
   limit?: number;
   offset?: number;
 }
@@ -60,6 +61,7 @@ async function fetchTransactions(f: TransactionFilters): Promise<TransactionHist
   if (f.dateTo) params.set('dateTo', dayEnd(f.dateTo));
   if (f.paymentMethod) params.set('paymentMethod', f.paymentMethod);
   if (f.status) params.set('status', f.status);
+  if (f.userId) params.set('userId', f.userId);
 
   // The list endpoint is double-nested (`data.data`); apiClient unwraps exactly
   // one envelope level, so this resolves to the inner { data, netSum, pagination }.

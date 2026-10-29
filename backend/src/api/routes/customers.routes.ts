@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma';
 import { v4 as uuidv4 } from 'uuid';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { catchAsync, AppError } from '../../utils/errorHandler';
+import { logger } from '../../utils/logger';
 
 const router = Router();
 
@@ -41,6 +42,57 @@ async function assertCustomerAccess(customerId: string, user: any): Promise<void
     throw new AppError(403, 'Access denied');
   }
 }
+
+// ─── Customer Summary Stats ────────────────────────────────────
+router.get(
+  '/summary',
+  catchAsync(async (req: Request, res: Response) => {
+    const user = (req as any).user;
+    const where = customerStoreWhere(user);
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const [totalCustomers, vips, active30d, lifetimeSpend, totalOutstanding] = await Promise.all([
+      prisma.customer.count({ where }),
+      prisma.customer.count({
+        where: { ...where, tag: { equals: 'vip', mode: 'insensitive' } }
+      }),
+      prisma.customer.count({
+        where: {
+          ...where,
+          transactions: { some: { created_at: { gte: thirtyDaysAgo } } }
+        }
+      }),
+      prisma.customer.aggregate({
+        where,
+        _sum: { total_spent: true }
+      }),
+      // Outstanding = Sum(total_spent) - Sum(payments.amount)
+      prisma.payment.aggregate({
+        where: {
+          customer: {
+            store_id: user?.storeId // Match store isolation
+          }
+        },
+        _sum: { amount: true }
+      })
+    ]);
+
+    const totalSpent = Number(lifetimeSpend._sum.total_spent || 0);
+    const totalPaid = Number(totalOutstanding._sum.amount || 0);
+
+    res.json({
+      status: 'success',
+      data: {
+        total: totalCustomers,
+        vips,
+        active30d,
+        lifetimeSpend: totalSpent,
+        outstanding: totalSpent - totalPaid
+      }
+    });
+  })
+);
 
 // ─── Create customer ──────────────────────────────────────────
 router.post(
@@ -223,6 +275,13 @@ router.post(
     const { amount, date, notes } = req.body;
     const user = (req as any).user;
 
+    logger.info({
+      event: 'payment_request_received',
+      customerId: req.params.id,
+      body: req.body,
+      userId: user?.id
+    });
+
     if (!amount || amount <= 0) throw new AppError(400, 'Valid amount is required');
     if (!date) throw new AppError(400, 'Payment date is required');
 
@@ -243,24 +302,39 @@ router.post(
     const outstandingBalance = Number(customer.total_spent) - totalPaid;
 
     if (parseFloat(amount) > outstandingBalance) {
-      throw new AppError(
-        400,
-        `Payment amount (₦${parseFloat(amount).toLocaleString()}) exceeds outstanding balance (₦${Math.max(0, outstandingBalance).toLocaleString()})`
-      );
+      logger.info({
+        event: 'customer_overpayment',
+        customerId: req.params.id,
+        amount: parseFloat(amount),
+        outstanding: outstandingBalance
+      });
     }
 
-    const payment = await prisma.payment.create({
-      data: {
-        id: uuidv4(),
-        customer_id: req.params.id,
-        amount: parseFloat(amount),
-        date: new Date(date),
-        notes: notes || null,
-        recorded_by_user_id: user?.id
-      }
-    });
+    try {
+      const payment = await prisma.payment.create({
+        data: {
+          id: uuidv4(),
+          customer_id: req.params.id,
+          amount: parseFloat(amount),
+          date: new Date(date),
+          notes: notes || null,
+          recorded_by_user_id: user?.id
+        }
+      });
 
-    res.status(201).json({ status: 'success', data: payment });
+      res.status(201).json({ status: 'success', data: payment });
+    } catch (error: any) {
+      logger.error({
+        event: 'prisma_payment_create_failed',
+        error: error.message,
+        data: {
+          customerId: req.params.id,
+          amount: amount,
+          date: date
+        }
+      });
+      throw error;
+    }
   })
 );
 

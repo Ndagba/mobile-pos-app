@@ -4,6 +4,7 @@ import type { ExpiringBatchRow } from '@/hooks/useExpiringBatches';
 import { Spinner } from '@/components/ui/spinner';
 
 const URGENCY_STYLES: Record<string, string> = {
+  EXPIRED: 'bg-rose-100 text-rose-700 font-semibold',
   CRITICAL: 'bg-red-100 text-red-700',
   HIGH: 'bg-orange-100 text-orange-700',
   MEDIUM: 'bg-amber-100 text-amber-700',
@@ -75,7 +76,11 @@ export function ExpiringList({
               </td>
               <td className="px-4 py-2.5 text-muted-foreground">{r.batch_number || '—'}</td>
               <td className="px-4 py-2.5 text-muted-foreground">{formatDate(r.expiry_date)}</td>
-              <td className="px-4 py-2.5 text-right tabular-nums">{r.days_until_expiry}</td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {r.urgency === 'EXPIRED' || r.days_until_expiry < 0
+                  ? `${Math.abs(r.days_until_expiry)}d ago`
+                  : r.days_until_expiry}
+              </td>
               <td className="px-4 py-2.5 text-right tabular-nums">{r.quantity}</td>
             </tr>
           ))}

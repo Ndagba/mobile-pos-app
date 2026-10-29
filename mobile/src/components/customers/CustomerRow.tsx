@@ -7,7 +7,7 @@ export interface Customer {
   id: string;
   first_name: string;
   last_name: string;
-  phone: string;
+  phone?: string;
   total_spent: number;
   transaction_count: number;
   last_transaction_at?: string | null;

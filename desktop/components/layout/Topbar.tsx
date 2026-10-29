@@ -5,6 +5,7 @@ import { LogOut } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { StatusIndicators } from './StatusIndicators';
 import { Button } from '@/components/ui/button';
+import { BranchSelector } from './BranchSelector';
 
 export function Topbar() {
   const router = useRouter();
@@ -16,12 +17,10 @@ export function Topbar() {
     router.replace('/login');
   };
 
-  const branchLabel = user?.branch_name ?? 'All branches';
-
   return (
     <header className="flex h-16 items-center justify-between border-b bg-background px-6">
       <div className="flex flex-col">
-        <span className="text-sm font-medium">{branchLabel}</span>
+        <BranchSelector />
         <span className="text-xs text-muted-foreground">
           {user ? `${user.first_name || user.email} · ${user.role}` : ''}
         </span>

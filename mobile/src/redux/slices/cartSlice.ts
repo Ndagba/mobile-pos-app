@@ -6,7 +6,9 @@ export interface CartItem {
   quantity: number;
   unit_price: number;
   tax_rate: number;
+  tax_amount?: number;
   discount_amount?: number;
+  item_type?: 'PRODUCT' | 'SERVICE';
 }
 
 export interface CartState {

@@ -6,6 +6,14 @@ import { getAuthorizedBranchId, getAuthorizedBranchIds } from '../../utils/branc
 import { processAndSaveImage } from '../../utils/imageProcessor';
 
 const router = Router();
+const normalizeItemType = (value: unknown): 'PRODUCT' | 'SERVICE' => {
+  if (value === undefined || value === null || value === '') return 'PRODUCT';
+  const itemType = String(value).toUpperCase();
+  if (itemType !== 'PRODUCT' && itemType !== 'SERVICE') {
+    throw new AppError(400, 'item_type must be PRODUCT or SERVICE');
+  }
+  return itemType;
+};
 
 // POST /v1/products/upload-image (authenticated admin/manager)
 router.post(
@@ -73,7 +81,7 @@ router.get(
     const [products, total] = await Promise.all([
       prisma.product.findMany({
         where,
-        include: { category: true, inventory: true },
+        include: { category: true, inventory: true, location: true } as any,
         take: parseInt(limit as string),
         skip: parseInt(offset as string)
       }),
@@ -98,7 +106,7 @@ router.get(
   catchAsync(async (req: Request, res: Response) => {
     const product = await prisma.product.findUnique({
       where: { id: req.params.id },
-      include: { category: true, inventory: true }
+      include: { category: true, inventory: true, location: true } as any
     });
 
     if (!product) {
@@ -126,6 +134,7 @@ router.post(
 
     const {
       category_id,
+      location_id,
       sku,
       name,
       description,
@@ -141,6 +150,7 @@ router.post(
       unit,
       initial_quantity,
       low_stock_threshold,   // store-defined default; falls back to 10
+      item_type,
     } = req.body;
 
     // Determine branchId. Admins explicitly choose the target branch in the UI,
@@ -192,13 +202,15 @@ router.post(
       }
     }
 
-    // Create product + inventory record in one transaction
+    const resolvedItemType = normalizeItemType(item_type);
+    // Services are sellable catalog items but have no physical inventory.
     const productId = uuidv4();
     await prisma.$transaction(async (tx) => {
       await tx.product.create({
         data: {
           id: productId,
           category_id,
+          location_id: location_id || null,
           sku,
           name,
           description: description || null,
@@ -209,28 +221,30 @@ router.post(
           barcode: barcode || null,
           image_url: image_url || null,
           unit: unit || 'piece',
+          item_type: resolvedItemType,
           branch_id: branchId
-        }
+        } as any
       });
 
-      // Auto-create inventory record.
+      if (resolvedItemType === 'SERVICE') return;
+      // Auto-create inventory for physical products only.
       // Use the store-supplied threshold (sent from Settings) or fall back to 10.
       const resolvedThreshold = Math.max(1, Math.round(Number(low_stock_threshold ?? 10)));
       await tx.inventory.create({
         data: {
           id: uuidv4(),
           product_id: productId,
-          quantity_on_hand: BigInt(Math.max(0, Number(initial_quantity ?? 0))),
-          low_stock_threshold: BigInt(resolvedThreshold),
-          reorder_point: BigInt(Math.max(resolvedThreshold, 20))
+          quantity_on_hand: Math.max(0, Number(initial_quantity ?? 0)),
+          low_stock_threshold: resolvedThreshold,
+          reorder_point: Math.max(resolvedThreshold, 20)
         }
       });
     });
 
-    // Re-fetch with category + inventory after transaction commits
+    // Re-fetch with category + inventory + location after transaction commits
     const product = await prisma.product.findUnique({
       where: { id: productId },
-      include: { category: true, inventory: true }
+      include: { category: true, inventory: true, location: true } as any
     });
 
     res.status(201).json({
@@ -255,6 +269,7 @@ router.patch(
       name,
       description,
       category_id,
+      location_id,
       sku,
       marked_price,
       effective_price,
@@ -265,7 +280,8 @@ router.patch(
       barcode,
       image_url,
       unit,
-      is_active
+      is_active,
+      item_type
     } = req.body;
 
     // Load the product first so we can scope duplicate checks to its branch and
@@ -296,9 +312,23 @@ router.patch(
 
     // Build update payload — only include fields that were sent
     const updateData: any = {};
+    if (item_type !== undefined) {
+      const nextType = normalizeItemType(item_type);
+      if (nextType !== current.item_type) {
+        const inventory = await prisma.inventory.findUnique({ where: { product_id: current.id } });
+        if (nextType === 'SERVICE' && inventory && Number(inventory.quantity_on_hand) > 0) {
+          throw new AppError(400, 'Cannot convert a product with stock to a service. Adjust stock to zero first.');
+        }
+        if (nextType === 'PRODUCT' && !inventory) {
+          throw new AppError(400, 'Cannot convert a service to a product without an explicit inventory initialization.');
+        }
+        updateData.item_type = nextType;
+      }
+    }
     if (name !== undefined) updateData.name = name;
     if (description !== undefined) updateData.description = description;
     if (category_id !== undefined) updateData.category_id = category_id;
+    if (location_id !== undefined) updateData.location_id = location_id || null;
     if (sku !== undefined) updateData.sku = sku;
     if (cost_price !== undefined) updateData.cost_price = cost_price;
     if (tax_rate !== undefined) updateData.tax_rate = tax_rate;
@@ -316,7 +346,7 @@ router.patch(
     const product = await prisma.product.update({
       where: { id: req.params.id },
       data: updateData,
-      include: { category: true, inventory: true }
+      include: { category: true, inventory: true, location: true } as any
     });
 
     res.json({
@@ -451,6 +481,7 @@ router.post(
             barcode: p.barcode,
             image_url: p.image_url,
             unit: p.unit || 'piece',
+            item_type: normalizeItemType(p.item_type),
             branch_id: productBranchId
           }
         });
@@ -591,6 +622,7 @@ router.post(
           barcode: row.barcode || null,
           unit: row.unit || 'piece',
           description: row.description || null,
+          item_type: normalizeItemType(row.item_type),
         };
 
         // Look up by SKU first; if not found and a barcode is provided, fall
@@ -620,8 +652,9 @@ router.post(
           summary.products_created++;
         }
 
-        const stock = Math.max(0, parseInt(row.initial_stock || '0', 10) || 0);
-        const lowThreshold = Math.max(0, parseInt(row.low_stock_threshold || '10', 10) || 10);
+        if (product.item_type === 'SERVICE') continue;
+        const stock = Math.max(0, Number(row.initial_stock || '0') || 0);
+        const lowThreshold = Math.max(0, Number(row.low_stock_threshold || '10') || 10);
         await prisma.inventory.upsert({
           where: { product_id: product.id },
           update: { quantity_on_hand: stock, low_stock_threshold: lowThreshold },

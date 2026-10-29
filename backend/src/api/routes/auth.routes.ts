@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { AuthService } from '../../services/AuthService';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { catchAsync, AppError } from '../../utils/errorHandler';
+import { prisma } from '../../lib/prisma';
 
 const router = Router();
 
@@ -63,6 +64,44 @@ router.post(
     res.json({
       status: 'success',
       data: result
+    });
+  })
+);
+
+// Get all users in store (admin/manager only)
+router.get(
+  '/users',
+  authMiddleware,
+  catchAsync(async (req: Request, res: Response) => {
+    const user = (req as any).user;
+    const role = user?.role;
+    if (!['admin', 'manager'].includes(role)) {
+      throw new AppError(403, 'Only admins or managers can list users');
+    }
+
+    const storeId = user.storeId;
+    const branchId = req.query.branch_id as string | undefined;
+
+    const where: any = { store_id: storeId, is_active: true };
+    if (branchId) {
+      where.branch_id = branchId;
+    }
+
+    const users = await prisma.user.findMany({
+      where,
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+        role: true
+      },
+      orderBy: { first_name: 'asc' }
+    });
+
+    res.json({
+      status: 'success',
+      data: users
     });
   })
 );

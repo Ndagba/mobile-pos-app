@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { UserPlus, X } from 'lucide-react';
 import { naira } from '@jaypos/shared';
 import { Modal } from '@/components/ui/modal';
@@ -8,7 +8,11 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { useCustomers } from '@/hooks/useCustomers';
-import { customerDisplayName, type NormalizedCustomer } from '@/lib/normalize';
+import {
+  customerDisplayName,
+  type NormalizedCustomer,
+  normalizeCustomer
+} from '@/lib/normalize';
 
 /**
  * Optional customer for the sale. Selecting one enables the soft credit warning
@@ -25,9 +29,13 @@ export function CustomerPicker({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const { data: customers = [], isLoading } = useCustomers({
-    search: search.trim() || undefined,
+    filters: {
+      search: search.trim() || undefined,
+    },
     enabled: open,
   });
+
+  const normalizedCustomers = useMemo(() => customers.map(normalizeCustomer), [customers]);
 
   return (
     <div>
@@ -82,7 +90,7 @@ export function CustomerPicker({
               </p>
             ) : (
               <ul className="divide-y">
-                {customers.map((c) => (
+                {normalizedCustomers.map((c) => (
                   <li key={c.id}>
                     <button
                       type="button"

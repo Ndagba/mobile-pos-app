@@ -22,7 +22,7 @@ describe('cartSlice', () => {
       quantity: 1,
       unit_price: 100,
       tax_amount: 18,
-      line_total: 118
+      tax_rate: 18
     }));
     const state = store.getState().cart;
     expect(state.items).toHaveLength(1);
@@ -36,7 +36,7 @@ describe('cartSlice', () => {
       quantity: 1,
       unit_price: 100,
       tax_amount: 18,
-      line_total: 118
+      tax_rate: 18
     }));
     store.dispatch(removeItem('prod_1'));
     const state = store.getState().cart;
@@ -51,7 +51,7 @@ describe('cartSlice', () => {
       quantity: 1,
       unit_price: 100,
       tax_amount: 18,
-      line_total: 118
+      tax_rate: 18
     }));
     store.dispatch(updateQuantity({ product_id: 'prod_1', quantity: 3 }));
     const state = store.getState().cart;
@@ -65,7 +65,7 @@ describe('cartSlice', () => {
       quantity: 1,
       unit_price: 100,
       tax_amount: 18,
-      line_total: 118
+      tax_rate: 18
     }));
     store.dispatch(clearCart());
     const state = store.getState().cart;

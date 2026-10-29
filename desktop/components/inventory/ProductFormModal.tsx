@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import type { Product, Category } from '@jaypos/shared';
+import type { Product, Category, Location } from '@jaypos/shared';
 import type { Branch } from '@/hooks/useBranches';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
@@ -38,6 +38,7 @@ export function ProductFormModal({
   onClose,
   product,
   categories,
+  locations = [],
   canChooseBranch,
   branches = [],
   defaultBranchId,
@@ -47,6 +48,7 @@ export function ProductFormModal({
   /** null / undefined → create mode. */
   product?: Product | null;
   categories: Category[];
+  locations?: Location[];
   /** Admin + multi-branch: show a target-branch selector on create. */
   canChooseBranch?: boolean;
   branches?: Branch[];
@@ -70,6 +72,7 @@ export function ProductFormModal({
   const [initialQty, setInitialQty] = useState('0');
   const [threshold, setThreshold] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [locationId, setLocationId] = useState('');
   const [branchId, setBranchId] = useState<string | undefined>(undefined);
   const [imageUrl, setImageUrl] = useState('');
   const [localCategories, setLocalCategories] = useState<Category[]>([]);
@@ -102,6 +105,7 @@ export function ProductFormModal({
       setThreshold(String(lowStockThreshold(product)));
       setInitialQty('0');
       setCategoryId(product.category_id ?? '');
+      setLocationId(product.location_id ?? '');
       setImageUrl(product.image_url ?? '');
       setBranchId(product.branch_id ?? undefined);
     } else {
@@ -118,6 +122,7 @@ export function ProductFormModal({
       setThreshold('');
       setInitialQty('0');
       setCategoryId('');
+      setLocationId('');
       setImageUrl('');
       setBranchId(defaultBranchId ?? branches[0]?.id);
     }
@@ -199,6 +204,8 @@ export function ProductFormModal({
     if (description.trim()) fields.description = description.trim();
     if (imageUrl) fields.image_url = imageUrl;
     if (isProduct) fields.unit = unit.trim() || 'piece';
+    if (locationId) fields.location_id = locationId;
+    else if (isEdit) fields.location_id = null;
     return fields;
   };
 
@@ -321,6 +328,27 @@ export function ProductFormModal({
               ))}
             </select>
           )}
+        </div>
+
+        {/* Location */}
+        <div className="space-y-1.5">
+          <Label htmlFor="pf-location">Location</Label>
+          <select
+            id="pf-location"
+            value={locationId}
+            onChange={(e) => setLocationId(e.target.value)}
+            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            <option value="">No location assigned</option>
+            {locations.map((loc) => (
+              <option key={loc.id} value={loc.id}>
+                {loc.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">
+            Physical shop storage spot (e.g. Shelf A1, Refrigerator). Optional.
+          </p>
         </div>
 
         {/* Prices */}

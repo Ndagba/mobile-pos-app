@@ -82,7 +82,6 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
           name={meta.icon}
           size={active ? 20 : 22}
           color={active ? C.accent : C.muted}
-          style={{ strokeWidth: active ? 2.2 : 1.8 }}
         />
         {active && (
           <Text
@@ -126,7 +125,6 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
               name="cart-outline"
               size={22}
               color={C.accentFg}
-              style={{ strokeWidth: 2.2 }}
             />
           </TouchableOpacity>
           <Text style={styles.fabLabel}>NEW SALE</Text>

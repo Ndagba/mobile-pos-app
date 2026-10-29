@@ -1,62 +1,120 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/apiClient';
-import { offlineStore } from '@/lib/db';
-import { network } from '@/lib/network';
-import { normalizeCustomer, type NormalizedCustomer } from '@/lib/normalize';
+import type { Customer } from '@jaypos/shared';
 
-export interface UseCustomersOptions {
+export interface CustomerFilters {
   search?: string;
-  /** Skip fetching until true (e.g. the customer picker isn't open yet). */
-  enabled?: boolean;
+  limit?: number;
+  offset?: number;
 }
 
-/**
- * Customers for selection + the soft credit check.
- *
- * `GET /v1/customers?search=` — `search` matches first_name/last_name/phone/email.
- * Rows are normalised (Decimal strings → numbers) and gain a derived
- * `available_credit` = `credit_limit − total_spent` (null credit_limit = unlimited),
- * matching mobile's live check. Network-first with a Dexie fallback.
- */
-async function fetchCustomers(search?: string): Promise<NormalizedCustomer[]> {
-  const params = new URLSearchParams();
-  if (search) params.set('search', search);
-  params.set('limit', '50');
-  const qs = params.toString();
-
-  if (network.isOnline()) {
-    try {
-      const rows = await apiClient.get<Record<string, any>[]>(`/customers?${qs}`);
-      const customers = (rows ?? []).map(normalizeCustomer);
-      await offlineStore.saveCustomers(customers);
-      return customers;
-    } catch {
-      /* fall through to the offline cache */
-    }
-  }
-
-  let cached = (await offlineStore.getCustomers()).map(normalizeCustomer);
-  if (search) {
-    const q = search.toLowerCase();
-    cached = cached.filter(
-      (c) =>
-        c.first_name?.toLowerCase().includes(q) ||
-        c.last_name?.toLowerCase().includes(q) ||
-        c.phone?.toLowerCase().includes(q) ||
-        c.email?.toLowerCase().includes(q)
-    );
-  }
-  return cached;
+export interface CustomerSummary {
+  total: number;
+  vips: number;
+  active30d: number;
+  lifetimeSpend: number;
+  outstanding: number;
 }
 
-export function useCustomers(opts: UseCustomersOptions = {}) {
+export function useCustomerSummary() {
   return useQuery({
-    queryKey: ['customers', opts.search ?? ''],
-    // `always` so the Dexie fallback in fetchCustomers runs offline (see useProducts).
-    networkMode: 'always',
-    queryFn: () => fetchCustomers(opts.search),
-    enabled: opts.enabled ?? true,
+    queryKey: ['customers-summary'],
+    queryFn: async () => {
+      return await apiClient.get<CustomerSummary>('/customers/summary');
+    },
+  });
+}
+
+export function useCustomers(options: { filters?: CustomerFilters; enabled?: boolean } = {}) {
+  const { filters = {}, enabled = true } = options;
+  return useQuery({
+    queryKey: ['customers', filters],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (filters.search) params.set('search', filters.search);
+      if (filters.limit) params.set('limit', String(filters.limit));
+      if (filters.offset) params.set('offset', String(filters.offset));
+
+      const data = await apiClient.get<Customer[]>(`/customers?${params.toString()}`);
+      return data;
+    },
+    enabled,
+  });
+}
+
+export function useCreateCustomer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: Partial<Customer>) => {
+      return await apiClient.post<Customer>('/customers', data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+    },
+  });
+}
+
+export function useUpdateCustomer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Partial<Customer> }) => {
+      return await apiClient.patch<Customer>(`/customers/${id}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+    },
+  });
+}
+
+export function useDeleteCustomer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      return await apiClient.delete(`/customers/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+    },
+  });
+}
+
+export function useCustomerLedger(customerId: string) {
+  return useQuery({
+    queryKey: ['customer-ledger', customerId],
+    queryFn: async () => {
+      const [customer, history, payments] = await Promise.all([
+        apiClient.get<Customer>(`/customers/${customerId}`),
+        apiClient.get<any[]>(`/customers/${customerId}/history`),
+        apiClient.get<any[]>(`/customers/${customerId}/payments`).catch(() => []),
+      ]);
+      return { customer, history, payments };
+    },
+    enabled: !!customerId,
+  });
+}
+
+export function useRecordPayment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ customerId, data }: { customerId: string; data: any }) => {
+      return await apiClient.post(`/customers/${customerId}/payments`, data);
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['customer-ledger', variables.customerId] });
+    },
+  });
+}
+
+export function useDeletePayment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ customerId, paymentId }: { customerId: string; paymentId: string }) => {
+      return await apiClient.delete(`/customers/${customerId}/payments/${paymentId}`);
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['customer-ledger', variables.customerId] });
+    },
   });
 }

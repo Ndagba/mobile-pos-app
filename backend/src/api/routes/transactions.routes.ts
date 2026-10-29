@@ -80,7 +80,8 @@ router.get(
         dateTo: dateTo ? new Date(dateTo as string) : undefined,
         paymentMethod: paymentMethod as string,
         status: status as string,
-        branchId: branchId && branchId !== 'null' && branchId !== 'undefined' ? branchId as string : undefined
+        branchId: branchId && branchId !== 'null' && branchId !== 'undefined' ? branchId as string : undefined,
+        userId: req.query.userId ? req.query.userId as string : undefined,
       }
     );
 

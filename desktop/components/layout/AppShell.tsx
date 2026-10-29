@@ -7,9 +7,6 @@ import { useAutoSync } from '@/hooks/useAutoSync';
 
 /** Authenticated app chrome: fixed sidebar + sticky topbar + scrollable main. */
 export function AppShell({ children }: { children: ReactNode }) {
-  // Seed connectivity + pending count and drain the sync queue on reconnect.
-  useAutoSync();
-
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar />

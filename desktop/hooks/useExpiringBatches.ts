@@ -40,14 +40,20 @@ function normalize(rows: Record<string, unknown>[]): ExpiringBatchRow[] {
   }));
 }
 
-/** Batches expiring within `days` (default 7). Not store-scoped — see the file note. */
-export function useExpiringBatches({ days = 7 }: { days?: number } = {}) {
+/** Batches expiring within `days` or already expired. */
+export function useExpiringBatches({
+  days = 30,
+  status = 'expiring',
+}: {
+  days?: number;
+  status?: 'expiring' | 'expired';
+} = {}) {
   const online = useNetworkStatus();
   return useQuery({
-    queryKey: ['expiring', days, online],
+    queryKey: ['expiring', days, status, online],
     queryFn: async () => {
       const rows = await apiClient.get<Record<string, unknown>[]>(
-        `/inventory/expiring?days=${days}`
+        `/inventory/expiring?days=${days}&status=${status}`
       );
       return normalize(rows ?? []);
     },

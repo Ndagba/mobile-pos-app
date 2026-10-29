@@ -72,17 +72,22 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   async restore() {
+    console.log('[AuthStore] restore starting...');
     if (typeof window === 'undefined') return;
-    const token = await webTokenStorage.getAccessToken();
-    const raw = window.localStorage.getItem(USER_KEY);
-    if (!token || !raw) {
-      set({ status: 'idle', user: null, hydrated: true });
-      return;
-    }
     try {
+      const token = await webTokenStorage.getAccessToken();
+      const raw = window.localStorage.getItem(USER_KEY);
+      console.log('[AuthStore] restore tokens found:', { hasToken: !!token, hasRaw: !!raw });
+      if (!token || !raw) {
+        console.log('[AuthStore] restore: no session found, marking hydrated=true, user=null');
+        set({ status: 'idle', user: null, hydrated: true });
+        return;
+      }
       const user = JSON.parse(raw) as AuthUser;
+      console.log('[AuthStore] restore: session found, user:', user?.first_name);
       set({ user, status: 'authenticated', hydrated: true });
-    } catch {
+    } catch (e) {
+      console.error('[AuthStore] restore error:', e);
       set({ status: 'idle', user: null, hydrated: true });
     }
   }

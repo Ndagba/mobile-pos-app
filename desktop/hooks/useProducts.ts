@@ -30,12 +30,14 @@ export interface UseProductsOptions {
  * from Dexie so the POS keeps selling.
  */
 async function fetchProducts({ search, categoryId, branchId, limit }: UseProductsOptions): Promise<Product[]> {
+  console.log('[useProducts] Fetching products...', { search, categoryId, branchId, limit });
   const params = new URLSearchParams();
   if (search) params.set('search', search);
   if (categoryId) params.set('category_id', categoryId);
   if (branchId) params.set('branch_id', branchId);
   params.set('limit', String(limit ?? 200));
   const qs = params.toString();
+
 
   if (network.isOnline()) {
     try {

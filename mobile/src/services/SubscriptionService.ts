@@ -13,8 +13,8 @@ export class SubscriptionServiceClass {
    */
   async getPlans(): Promise<SubscriptionPlan[]> {
     try {
-      const response = await this.api.get('/subscriptions/plans');
-      return response.data || [];
+      const plans = await this.api.get<SubscriptionPlan[]>('/subscriptions/plans');
+      return plans || [];
     } catch (error) {
       console.error('Error fetching plans:', error);
       throw error;
@@ -26,8 +26,8 @@ export class SubscriptionServiceClass {
    */
   async getSubscription(): Promise<Subscription | null> {
     try {
-      const response = await this.api.get('/subscriptions');
-      return response.data || null;
+      const subscription = await this.api.get<Subscription>('/subscriptions');
+      return subscription || null;
     } catch (error: any) {
       // 404 means no subscription yet, which is fine
       if (error.response?.status === 404) {
@@ -43,8 +43,7 @@ export class SubscriptionServiceClass {
    */
   async startTrial(): Promise<Subscription> {
     try {
-      const response = await this.api.post('/subscriptions/start-trial', {});
-      return response.data;
+      return await this.api.post<Subscription>('/subscriptions/start-trial', {});
     } catch (error) {
       console.error('Error starting trial:', error);
       throw error;
@@ -62,10 +61,14 @@ export class SubscriptionServiceClass {
     amount: number;
   }> {
     try {
-      const response = await this.api.post('/subscriptions/onboarding', {
+      return await this.api.post<{
+        authorization_url: string;
+        access_code: string;
+        reference: string;
+        amount: number;
+      }>('/subscriptions/onboarding', {
         planSlug,
       });
-      return response.data;
     } catch (error) {
       console.error('Error initializing onboarding payment:', error);
       throw error;
@@ -81,11 +84,10 @@ export class SubscriptionServiceClass {
     planSlug: 'business' | 'pro'
   ): Promise<Subscription> {
     try {
-      const response = await this.api.post('/subscriptions/onboarding/verify', {
+      return await this.api.post<Subscription>('/subscriptions/onboarding/verify', {
         reference,
         planSlug,
       });
-      return response.data;
     } catch (error) {
       console.error('Error verifying payment:', error);
       throw error;
@@ -98,10 +100,9 @@ export class SubscriptionServiceClass {
    */
   async upgradePlan(newPlanSlug: 'business' | 'pro'): Promise<Subscription> {
     try {
-      const response = await this.api.post('/subscriptions/upgrade', {
+      return await this.api.post<Subscription>('/subscriptions/upgrade', {
         newPlanSlug,
       });
-      return response.data;
     } catch (error) {
       console.error('Error upgrading plan:', error);
       throw error;
@@ -113,8 +114,8 @@ export class SubscriptionServiceClass {
    */
   async getInvoices(): Promise<Invoice[]> {
     try {
-      const response = await this.api.get('/subscriptions/invoices');
-      return response.data || [];
+      const invoices = await this.api.get<Invoice[]>('/subscriptions/invoices');
+      return invoices || [];
     } catch (error) {
       console.error('Error fetching invoices:', error);
       throw error;
@@ -142,8 +143,11 @@ export class SubscriptionServiceClass {
     reference: string;
   }> {
     try {
-      const response = await this.api.patch(`/subscriptions/${subscriptionId}/payment-method`, {});
-      return response.data;
+      return await this.api.patch<{
+        authorization_url: string;
+        access_code: string;
+        reference: string;
+      }>(`/subscriptions/${subscriptionId}/payment-method`, {});
     } catch (error) {
       console.error('Error updating payment method:', error);
       throw error;

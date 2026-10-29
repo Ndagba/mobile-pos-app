@@ -28,6 +28,11 @@ model Branch {
   stock_counts StockCount[]
   shifts       CashShift[]
   movements    InventoryMovement[]
+  purchase_orders PurchaseOrder[]
+  goods_receipts  GoodsReceipt[]
+  expense_categories ExpenseCategory[]
+  expenses Expense[]
+  locations Location[]
 
   @@index([store_id])
   @@index([is_active])
@@ -63,6 +68,8 @@ model User {
   stock_counts_completed StockCount[]        @relation("StockCountCompletedBy")
   shifts                 CashShift[]         @relation("UserShifts")
   movements              InventoryMovement[]
+  created_purchase_orders PurchaseOrder[]    @relation("POCreatedBy")
+  goods_receipts         GoodsReceipt[]      @relation("GoodsReceivedBy")
 
   @@index([email])
   @@index([username])
@@ -89,9 +96,27 @@ model Category {
   @@index([branch_id])
 }
 
+model Location {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  is_active   Boolean  @default(true)
+  branch_id   String
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  branch   Branch    @relation(fields: [branch_id], references: [id])
+  products Product[]
+
+  @@unique([name, branch_id])
+  @@index([is_active])
+  @@index([branch_id])
+}
+
 model Product {
   id              String   @id @default(uuid())
   category_id     String
+  location_id     String?
   sku             String
   name            String
   description     String?
@@ -102,23 +127,30 @@ model Product {
   barcode         String?
   image_url       String?
   unit            String   @default("piece") // piece, kg, liter, etc.
+  item_type       String   @default("PRODUCT") // PRODUCT or SERVICE
   is_active       Boolean  @default(true)
   branch_id       String
   created_at      DateTime @default(now())
   updated_at      DateTime @updatedAt
 
   category          Category            @relation(fields: [category_id], references: [id], onDelete: Cascade)
+  location          Location?           @relation(fields: [location_id], references: [id], onDelete: SetNull)
   branch            Branch              @relation(fields: [branch_id], references: [id])
   inventory         Inventory?
   transaction_items TransactionItem[]
   batches           BatchTracking[]
   stock_count_items StockCountItem[]
   movements         InventoryMovement[]
+  purchase_order_items PurchaseOrderItem[]
+  goods_receipt_items  GoodsReceiptItem[]
+  service_components ServiceComponent[] @relation("ServiceToComponents")
+  used_in_services ServiceComponent[] @relation("PartToServices")
 
   @@unique([sku, branch_id])
   @@unique([barcode, branch_id])
   @@index([barcode])
   @@index([category_id])
+  @@index([location_id])
   @@index([is_active])
   @@index([branch_id])
 }
@@ -126,10 +158,10 @@ model Product {
 model Inventory {
   id                  String    @id @default(uuid())
   product_id          String    @unique
-  quantity_on_hand    BigInt    @default(0)
-  quantity_reserved   BigInt    @default(0)
-  low_stock_threshold BigInt    @default(10)
-  reorder_point       BigInt    @default(20)
+  quantity_on_hand    Decimal   @default(0) @db.Decimal(15, 4)
+  quantity_reserved   Decimal   @default(0) @db.Decimal(15, 4)
+  low_stock_threshold Decimal   @default(10) @db.Decimal(15, 4)
+  reorder_point       Decimal   @default(20) @db.Decimal(15, 4)
   last_stock_check    DateTime?
   created_at          DateTime  @default(now())
   updated_at          DateTime  @updatedAt
@@ -145,7 +177,7 @@ model BatchTracking {
   batch_number       String
   manufactured_date  DateTime @db.Date
   expiry_date        DateTime @db.Date
-  quantity           BigInt
+  quantity           Decimal  @db.Decimal(15, 4)
   warehouse_location String?
   is_expired         Boolean  @default(false)
   created_at         DateTime @default(now())
@@ -215,9 +247,10 @@ model Transaction {
   tax_amount           Decimal   @default(0) @db.Decimal(15, 2)
   discount_amount      Decimal   @default(0) @db.Decimal(15, 2)
   total_amount         Decimal   @db.Decimal(15, 2)
-  payment_method       String // cash, card, mobile_wallet
+  payment_method       String // cash, card, mobile_wallet, split
   payment_status       String    @default("pending") // pending, completed, failed, refunded
   payment_reference    String?
+  payment_splits       Json?
   receipt_number       String?   @unique
   receipt_url          String?
   status               String    @default("completed") // completed, voided, refunded
@@ -248,8 +281,9 @@ model TransactionItem {
   id              String   @id @default(uuid())
   transaction_id  String
   product_id      String
-  quantity        Int
+  quantity        Decimal  @db.Decimal(15, 4)
   unit_price      Decimal  @db.Decimal(12, 2)
+  cost_price      Decimal? @db.Decimal(12, 2)
   tax_amount      Decimal  @default(0) @db.Decimal(15, 2)
   discount_amount Decimal  @default(0) @db.Decimal(15, 2)
   line_total      Decimal  @db.Decimal(15, 2)
@@ -479,8 +513,9 @@ model Supplier {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  invoices PurchaseInvoice[]
-  payments SupplierPayment[]
+  invoices        PurchaseInvoice[]
+  payments        SupplierPayment[]
+  purchase_orders PurchaseOrder[]
 
   @@index([store_id])
   @@index([name])
@@ -499,15 +534,18 @@ model PurchaseInvoice {
   status              String    @default("unpaid") // unpaid, partial, paid
   notes               String?
   recorded_by_user_id String?
+  purchase_order_id   String? // set when auto-created from a goods receipt (Phase 4B, opt-in)
   created_at          DateTime  @default(now())
   updated_at          DateTime  @updatedAt
 
-  supplier Supplier @relation(fields: [supplier_id], references: [id], onDelete: Cascade)
+  supplier       Supplier       @relation(fields: [supplier_id], references: [id], onDelete: Cascade)
+  purchase_order PurchaseOrder? @relation(fields: [purchase_order_id], references: [id], onDelete: SetNull)
 
   @@index([supplier_id])
   @@index([store_id])
   @@index([status])
   @@index([invoice_date])
+  @@index([purchase_order_id])
 }
 
 model SupplierPayment {
@@ -557,9 +595,9 @@ model StockCountItem {
   id                String  @id @default(uuid())
   stock_count_id    String
   product_id        String
-  system_quantity   BigInt
-  physical_quantity BigInt?
-  variance          BigInt?
+  system_quantity   Decimal  @db.Decimal(15, 4)
+  physical_quantity Decimal? @db.Decimal(15, 4)
+  variance          Decimal? @db.Decimal(15, 4)
   notes             String?
 
   stock_count StockCount @relation(fields: [stock_count_id], references: [id], onDelete: Cascade)
@@ -598,7 +636,7 @@ model InventoryMovement {
   branch_id     String
   product_id    String
   movement_type String // sale, purchase, adjustment, transfer
-  quantity      BigInt // positive for addition, negative for deduction
+  quantity      Decimal  @db.Decimal(15, 4) // positive for addition, negative for deduction
   reference_id  String? // transaction_id, invoice_id, stock_count_id
   notes         String?
   user_id       String?
@@ -613,4 +651,156 @@ model InventoryMovement {
   @@index([product_id])
   @@index([movement_type])
   @@index([timestamp])
+}
+
+// ─── Procurement (Phase 4B) ───────────────────────────────────
+// Purchase-order lifecycle: draft → ordered → partially_received → received
+// (or cancelled before any receipt). Receiving is the ONLY new stock-in path —
+// it increments Inventory.quantity_on_hand and writes a `purchase` InventoryMovement.
+
+model PurchaseOrder {
+  id                 String    @id @default(uuid())
+  store_id           String // tenant isolation (string, not FK — matches Transaction/Supplier)
+  branch_id          String // receiving location
+  supplier_id        String
+  po_number          String // human ref, unique per store (see @@unique)
+  status             String    @default("draft") // draft, ordered, partially_received, received, cancelled
+  order_date         DateTime? @db.Date // set when moved to "ordered"
+  expected_date      DateTime? @db.Date
+  currency           String    @default("NGN") // single-currency today; column reserved
+  subtotal           Decimal   @default(0) @db.Decimal(15, 2) // Σ(line qty × unit_cost)
+  tax_amount         Decimal   @default(0) @db.Decimal(15, 2)
+  total_amount       Decimal   @default(0) @db.Decimal(15, 2)
+  notes              String?
+  created_by_user_id String?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  supplier   Supplier            @relation(fields: [supplier_id], references: [id], onDelete: Restrict)
+  branch     Branch              @relation(fields: [branch_id], references: [id])
+  created_by User?               @relation("POCreatedBy", fields: [created_by_user_id], references: [id], onDelete: SetNull)
+  items      PurchaseOrderItem[]
+  receipts   GoodsReceipt[]
+  invoices   PurchaseInvoice[]
+
+  @@unique([store_id, po_number])
+  @@index([store_id])
+  @@index([branch_id])
+  @@index([supplier_id])
+  @@index([status])
+  @@index([order_date])
+}
+
+model PurchaseOrderItem {
+  id                String  @id @default(uuid())
+  purchase_order_id String
+  product_id        String
+  quantity_ordered  Decimal @db.Decimal(15, 4)
+  quantity_received Decimal @default(0) @db.Decimal(15, 4) // running total across receipts
+  unit_cost         Decimal @db.Decimal(15, 2)
+  line_total        Decimal @db.Decimal(15, 2) // quantity_ordered × unit_cost (server-computed)
+  notes             String?
+
+  purchase_order PurchaseOrder      @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  product        Product            @relation(fields: [product_id], references: [id], onDelete: Restrict)
+  receipt_items  GoodsReceiptItem[]
+
+  @@index([purchase_order_id])
+  @@index([product_id])
+}
+
+model GoodsReceipt {
+  id                  String   @id @default(uuid())
+  store_id            String
+  branch_id           String
+  purchase_order_id   String
+  received_date       DateTime @db.Date
+  reference           String? // supplier delivery note / waybill no.
+  receipt_hash        String?  @unique // optional idempotency key (double-submit safety)
+  notes               String?
+  received_by_user_id String?
+  created_at          DateTime @default(now())
+
+  purchase_order PurchaseOrder      @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  branch         Branch             @relation(fields: [branch_id], references: [id])
+  received_by    User?              @relation("GoodsReceivedBy", fields: [received_by_user_id], references: [id], onDelete: SetNull)
+  items          GoodsReceiptItem[]
+
+  @@index([store_id])
+  @@index([branch_id])
+  @@index([purchase_order_id])
+  @@index([received_date])
+}
+
+model GoodsReceiptItem {
+  id                     String    @id @default(uuid())
+  goods_receipt_id       String
+  purchase_order_item_id String
+  product_id             String
+  quantity_received      Decimal   @db.Decimal(15, 4)
+  unit_cost              Decimal   @db.Decimal(15, 2) // captured for cost history; defaults from the PO line
+  batch_number           String? // when the product is batch-tracked
+  expiry_date            DateTime? @db.Date
+
+  goods_receipt       GoodsReceipt      @relation(fields: [goods_receipt_id], references: [id], onDelete: Cascade)
+  purchase_order_item PurchaseOrderItem @relation(fields: [purchase_order_item_id], references: [id], onDelete: Restrict)
+  product             Product           @relation(fields: [product_id], references: [id], onDelete: Restrict)
+
+  @@index([goods_receipt_id])
+  @@index([purchase_order_item_id])
+  @@index([product_id])
+}
+
+model ExpenseCategory {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  branch_id   String
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  branch   Branch    @relation(fields: [branch_id], references: [id])
+  expenses Expense[]
+
+  @@index([branch_id])
+}
+
+model Expense {
+  id                String   @id @default(uuid())
+  category_id       String
+  branch_id         String
+  amount            Decimal  @db.Decimal(15, 2)
+  description       String?
+  expenseDate       DateTime @db.Date
+  paymentMethod     String
+  referenceNumber   String?
+  status            String   @default("recorded") // recorded, voided
+  createdBy         String
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  category ExpenseCategory @relation(fields: [category_id], references: [id])
+  branch   Branch          @relation(fields: [branch_id], references: [id])
+
+  @@index([category_id])
+  @@index([branch_id])
+  @@index([expenseDate])
+}
+
+model ServiceComponent {
+  id                  String   @id @default(uuid())
+  service_id          String
+  product_id         String?
+  component_type      String   // PART or LABOR
+  quantity            Decimal  @default(1) @db.Decimal(15, 4)
+  default_labor_cost  Decimal? @db.Decimal(12, 2)
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  service Product @relation("ServiceToComponents", fields: [service_id], references: [id])
+  product Product? @relation("PartToServices", fields: [product_id], references: [id])
+
+  @@index([service_id])
+  @@index([product_id])
 }

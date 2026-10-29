@@ -84,7 +84,7 @@ Standard envelope `{status:'success', data, [pagination]}`; `apiClient` unwraps 
 
 ## 5. Known caveats (inherited from the backend; not fixed in 4A)
 
-- **`DELETE /suppliers/:id` is a hard delete.** The confirm dialog warns it also removes invoices/payments. Whether related rows cascade depends on the DB FK config; if a constraint blocks the delete, the error surfaces to the user. (Phase 4B's `onDelete: Restrict` on POs would additionally block deleting suppliers that have purchase orders — see design doc §12.)
+- **`DELETE /suppliers/:id` is a hard delete.** The confirm dialog warns it also removes invoices/payments. **Updated in Phase 4B (2026‑09‑07):** `PurchaseOrder.supplier` is now `onDelete: Restrict`, so a supplier referenced by any purchase order **cannot** be hard-deleted. The delete route catches the Prisma FK violation (`P2003`) and returns a clear **409** ("This supplier has purchase orders and can't be deleted. Cancel or remove them first.") instead of a generic 500; the desktop delete-confirm copy warns about this up-front and surfaces the backend message via `apiErrorMessage`. (Cascade of invoices/payments still applies to suppliers with no POs.)
 - **Deleting a payment does not roll back the invoice status** (verified live 2026‑08‑25). `POST /payments` recomputes and advances the linked invoice's status; `DELETE /payments/:id` does **not** — the invoice keeps its advanced status (e.g. stays `partial`) while its paid total drops back. The desktop UI cannot fix this server-side, so the inline status select is the manual correction. See §4.
 - **No procurement / stock-in yet** — AP invoices here have no product FK and never touch inventory (by design; that's Phase 4B).
 

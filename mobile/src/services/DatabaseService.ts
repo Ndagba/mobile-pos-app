@@ -78,7 +78,8 @@ class DatabaseService {
     try {
       const existing = await this.getProducts();
       const map = new Map(existing.map((p: any) => [p.id, p]));
-      products.forEach((p) => map.set(p.id, p));
+      // Legacy cached products predate item_type and remain physical products.
+      products.forEach((p) => map.set(p.id, { ...p, item_type: p.item_type ?? 'PRODUCT' }));
       await AsyncStorage.setItem(this.getStoreKey('products'), JSON.stringify(Array.from(map.values())));
     } catch (error) {
       console.error('Error saving products:', error);
@@ -88,7 +89,7 @@ class DatabaseService {
 
   async getProducts() {
     const data = await AsyncStorage.getItem(this.getStoreKey('products'));
-    return data ? JSON.parse(data) : [];
+    return data ? JSON.parse(data).map((p: any) => ({ ...p, item_type: p.item_type ?? 'PRODUCT' })) : [];
   }
 
   async searchProducts(query: string) {

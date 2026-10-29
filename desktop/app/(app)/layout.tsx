@@ -22,9 +22,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [hydrated, user, router]);
 
-  if (!hydrated || !user) {
+  // 1. While we don't know if we are hydrated yet, show the loading spinner.
+  if (!hydrated) {
     return <FullscreenSpinner />;
   }
 
+  // 2. If we are hydrated but have no user, we are about to be redirected.
+  // Return null to avoid showing the "Loading session..." spinner for a user
+  // who is clearly not logged in.
+  if (!user) {
+    return null;
+  }
+
+  // 3. Hydrated and authenticated.
   return <AppShell>{children}</AppShell>;
 }

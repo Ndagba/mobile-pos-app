@@ -3,11 +3,12 @@
 import type { PaymentMethod } from '@jaypos/shared';
 import { cn } from '@/lib/utils';
 
-/** Backend payment methods. `mobile_wallet` is labelled "Transfer" (mobile parity). */
+/** Backend payment methods. */
 const METHODS: { value: PaymentMethod; label: string }[] = [
   { value: 'cash', label: 'Cash' },
   { value: 'card', label: 'Card' },
-  { value: 'mobile_wallet', label: 'Transfer' },
+  { value: 'transfer', label: 'Transfer' },
+  { value: 'split', label: 'Split' },
 ];
 
 export function PaymentMethodSelect({
@@ -20,7 +21,7 @@ export function PaymentMethodSelect({
   return (
     <div>
       <p className="mb-1.5 text-sm text-muted-foreground">Payment method</p>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-4 gap-2">
         {METHODS.map((m) => (
           <button
             key={m.value}

@@ -9,6 +9,8 @@ router.use(authMiddleware);
 
 // EOD Summary Report
 router.get('/eod', catchAsync(async (req: Request, res: Response) => {
+  // Transaction-level report: payment and void totals use transaction.total_amount,
+  // so there is no product-vs-service line split here (mixed baskets are correct).
   const user = (req as any).user;
   const storeId = user.storeId;
   const branchIds = await getAuthorizedBranchIds(req);
@@ -50,7 +52,7 @@ router.get('/eod', catchAsync(async (req: Request, res: Response) => {
 
   const paymentsMap: Record<string, { method: string; count: number; total: number }> = {};
   for (const p of paymentsRaw) {
-    const method = p.payment_method === 'mobile_wallet' ? 'transfer' : p.payment_method;
+    const method = p.payment_method === 'transfer' ? 'transfer' : p.payment_method;
     const count = p._count.id;
     const total = p._sum.total_amount ? Number(p._sum.total_amount) : 0;
 
@@ -99,6 +101,8 @@ router.get('/eod', catchAsync(async (req: Request, res: Response) => {
 
 // Void & Refund Report
 router.get('/voids', catchAsync(async (req: Request, res: Response) => {
+  // Transaction-level report (no line-item split): each voided/refunded
+  // transaction's total already reflects both product and service lines.
   const user = (req as any).user;
   const storeId = user.storeId;
   const branchIds = await getAuthorizedBranchIds(req);

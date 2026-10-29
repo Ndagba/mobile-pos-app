@@ -178,62 +178,78 @@ export class AuthService {
   }
 
   static async login(username: string, password: string) {
-    const user = await prisma.user.findUnique({
-      where: { username: username.toLowerCase().trim() },
-      select: {
-        id: true,
-        email: true,
-        first_name: true,
-        role: true,
-        store_id: true,
-        branch_id: true,
-        is_active: true,
-        is_super_admin: true,
-        password_hash: true,
-        branch: { select: { name: true } }
+    logger.info({ event: 'login_attempt', username });
+    try {
+      const user = await prisma.user.findUnique({
+        where: { username: username.toLowerCase().trim() },
+        select: {
+          id: true,
+          email: true,
+          first_name: true,
+          role: true,
+          store_id: true,
+          branch_id: true,
+          is_active: true,
+          is_super_admin: true,
+          password_hash: true,
+          branch: { select: { name: true } }
+        }
+      });
+
+      if (!user || !user.is_active) {
+        logger.warn({ event: 'login_failed', username, reason: !user ? 'user_not_found' : 'user_inactive' });
+        throw new AppError(401, 'Invalid username or password');
       }
-    });
-
-    if (!user || !user.is_active) {
-      throw new AppError(401, 'Invalid username or password');
-    }
-    if (!user.password_hash) {
-      throw new AppError(401, 'No password set for this account. Ask your administrator to set one.');
-    }
-
-    const ok = await bcryptjs.compare(password, user.password_hash);
-    if (!ok) {
-      throw new AppError(401, 'Invalid username or password');
-    }
-
-    const { accessToken, refreshToken } = this.generateTokens(
-      user.id,
-      user.email,
-      user.role,
-      user.store_id,
-      user.branch_id,
-      user.is_super_admin
-    );
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { last_login_at: new Date() }
-    });
-
-    return {
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        first_name: user.first_name ?? '',
-        role: user.role,
-        store_id: user.store_id,
-        branch_id: user.branch_id ?? null,
-        branch_name: user.branch?.name ?? null,
-        is_super_admin: user.is_super_admin
+      if (!user.password_hash) {
+        logger.warn({ event: 'login_failed', username, reason: 'no_password_hash' });
+        throw new AppError(401, 'No password set for this account. Ask your administrator to set one.');
       }
-    };
+
+      const ok = await bcryptjs.compare(password, user.password_hash);
+      if (!ok) {
+        logger.warn({ event: 'login_failed', username, reason: 'wrong_password' });
+        throw new AppError(401, 'Invalid username or password');
+      }
+
+      const { accessToken, refreshToken } = this.generateTokens(
+        user.id,
+        user.email,
+        user.role,
+        user.store_id,
+        user.branch_id,
+        user.is_super_admin
+      );
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { last_login_at: new Date() }
+      });
+
+      logger.info({ event: 'login_success', userId: user.id, username });
+      return {
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        user: {
+          id: user.id,
+          email: user.email,
+          first_name: user.first_name ?? '',
+          role: user.role,
+          store_id: user.store_id,
+          branch_id: user.branch_id ?? null,
+          branch_name: user.branch?.name ?? null,
+          is_super_admin: user.is_super_admin
+        }
+      };
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      logger.error({
+        event: 'login_unexpected_error',
+        username,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      throw error;
+    }
   }
 
   static async registerEmployee(

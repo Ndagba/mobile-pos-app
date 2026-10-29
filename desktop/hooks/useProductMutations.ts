@@ -30,6 +30,7 @@ export interface ProductWriteFields {
   description?: string;
   image_url?: string;
   unit?: string;
+  location_id?: string | null;
 }
 
 export interface ProductCreateInput extends ProductWriteFields {
@@ -54,6 +55,7 @@ export function useProductMutations() {
     queryClient.invalidateQueries({ queryKey: ['products'] });
     queryClient.invalidateQueries({ queryKey: ['low-stock'] });
     queryClient.invalidateQueries({ queryKey: ['categories'] });
+    queryClient.invalidateQueries({ queryKey: ['locations'] });
   };
 
   const create = useMutation({

@@ -8,7 +8,8 @@ import {
   TouchableOpacity,
   TextInput as RNTextInput,
   Platform,
-  ListRenderItem,
+  SectionListRenderItem,
+  SectionListData,
   ScrollView,
   KeyboardAvoidingView,
   useWindowDimensions,
@@ -349,11 +350,11 @@ export default function CustomersScreen() {
     }
   };
 
-  const renderSectionHeader: ListRenderItem<any> = ({ section: { title } }) => (
+  const renderSectionHeader = ({ section: { title } }: { section: SectionListData<FilteredCustomer, SectionData> }) => (
     <Text style={styles.sectionHeader}>{title}</Text>
   );
 
-  const renderRow: ListRenderItem<FilteredCustomer> = ({ item, index, section }) => (
+  const renderRow: SectionListRenderItem<FilteredCustomer, SectionData> = ({ item, index, section }) => (
     <View style={{ backgroundColor: C.card, borderWidth: 1, borderColor: C.border }}>
       <CustomerRow
         customer={item}

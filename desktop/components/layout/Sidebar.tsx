@@ -9,13 +9,16 @@ import {
   History,
   Package,
   Truck,
+  ClipboardList,
   BarChart3,
   Store,
+  Users,
+  Wallet,
   type LucideIcon
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
-import { canManageInventory, canManageSuppliers } from '@/lib/roles';
+import { canManageInventory, canManageSuppliers, canManagePurchasing } from '@/lib/roles';
 
 interface NavItem {
   label: string;
@@ -25,6 +28,8 @@ interface NavItem {
   disabled?: boolean;
   /** Role gate — hidden entirely when this returns false. Absent → always shown. */
   visible?: (user: AuthUser | null) => boolean;
+  /** Additional path prefixes that activate this nav item */
+  matchPaths?: string[];
 }
 
 /**
@@ -37,9 +42,13 @@ const NAV: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Sales', href: '/sales', icon: ShoppingCart },
   { label: 'History', href: '/sales/history', icon: History },
+  { label: 'Customers', href: '/customers', icon: Users },
   { label: 'Inventory', href: '/inventory', icon: Package, visible: canManageInventory },
   { label: 'Suppliers', href: '/suppliers', icon: Truck, visible: canManageSuppliers },
-  { label: 'Reports', href: '/reports', icon: BarChart3, disabled: true }
+  { label: 'Purchasing', href: '/purchasing', icon: ClipboardList, visible: canManagePurchasing },
+  { label: 'Expenses', href: '/admin/expenses', icon: Wallet, visible: canManageInventory },
+  { label: 'Report', href: '/reports', icon: BarChart3, matchPaths: ['/admin/financials'] },
+  { label: 'Settings', href: '/settings', icon: Store, visible: (user) => user?.role === 'admin' || user?.role === 'manager' },
 ];
 
 export function Sidebar() {
@@ -53,7 +62,14 @@ export function Sidebar() {
   const activeHref = nav
     .filter((i) => !i.disabled)
     .map((i) => i.href)
-    .filter((href) => pathname === href || pathname.startsWith(`${href}/`))
+    .filter((href) => {
+      const item = nav.find((i) => i.href === href);
+      return (
+        pathname === href ||
+        pathname.startsWith(`${href}/`) ||
+        item?.matchPaths?.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+      );
+    })
     .sort((a, b) => b.length - a.length)[0];
 
   return (

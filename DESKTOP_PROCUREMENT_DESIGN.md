@@ -1,9 +1,30 @@
-# DESKTOP_PROCUREMENT_DESIGN.md — Phase 4B Design (SPEC ONLY)
+# DESKTOP_PROCUREMENT_DESIGN.md — Phase 4B Design (BUILT)
 
-> **Status: DESIGN ONLY. Not implemented.** This document specifies the Purchase-Order → Receiving → Stock-in subsystem that Phase 4 needs. **No `schema.prisma` edits, no migration, and no route code have been written for this.** Per the brief (§29) and `CLAUDE.md §9`, implementation begins only after **separate, explicit approval**. Everything below is a proposal to be reviewed.
+> **Status: BUILT — 2026‑09‑07.** This subsystem (Purchase-Order → Receiving → Stock-in) was approved ("Approve & build 4B") and implemented. The spec below stands as the design of record; **as-built notes and the decisions taken at build time are in §0 (Build outcome) directly under this banner.** All hermetic gates green: backend build ✓ + `PurchaseOrderService.test.ts` **23/23**, shared vitest **33/33** (no shared change), mobile **20/20**, desktop typecheck ✓ + build ✓ (**17 routes**). Live end-to-end verification is still pending a running backend with an active-subscription store.
 >
-> Companion docs: [`CLAUDE.md`](CLAUDE.md) (guardrails + verified architecture), [`DESKTOP_SUPPLIERS.md`](DESKTOP_SUPPLIERS.md) (the Phase 4A AP UI that shipped), [`TODO.md`](TODO.md).
-> Schema facts below were verified against `backend/prisma/schema.prisma` on **2026‑08‑24**.
+> Companion docs: [`CLAUDE.md`](CLAUDE.md) (guardrails + verified architecture), [`DESKTOP_SUPPLIERS.md`](DESKTOP_SUPPLIERS.md) (the Phase 4A AP UI), [`TODO.md`](TODO.md).
+> Schema facts below were verified against `backend/prisma/schema.prisma` on **2026‑08‑24**; the build landed 2026‑09‑07.
+
+---
+
+## 0. Build outcome (as-built — 2026‑09‑07)
+
+**Decisions taken (confirmed at approval):**
+- **AP invoice on receipt:** off by default; opt-in `create_invoice: true` on the receive body → creates one unpaid `PurchaseInvoice` linked via the new nullable `PurchaseInvoice.purchase_order_id`.
+- **Over-receipt:** allowed and flagged; `Inventory.quantity_on_hand` rises by the *real* received amount, and a line can exceed its ordered qty (`quantity_outstanding` floors at 0).
+- **`cost_price`:** left untouched on receive (receiving records `unit_cost` on the receipt line only; it does not rewrite the product's cost).
+- **Shared code:** **none added** — all PO/receipt math is server-side; desktop wire types are declared locally in the hooks (mirrors Phase 4A). `@jaypos/shared` stays 33/33, mobile 20/20.
+- **Supplier FK:** `PurchaseOrder.supplier` is `onDelete: Restrict` (a supplier with POs can't be hard-deleted — see the Step-6 note below).
+- **Draft edit lock:** line *quantities* lock once `ordered`; notes/expected_date stay editable. `po_number` is client-supplied with a server `@@unique(store_id, po_number)` + `PO-YYYYMMDD-XXXX` fallback.
+
+**What shipped:**
+- **Schema/migration:** 4 additive models + 1 nullable `ADD COLUMN` — migration `20260907140000_add_purchase_orders` is `CREATE TABLE` × 4 + `ALTER TABLE … ADD COLUMN` × 1 + FK `ADD CONSTRAINT` + indexes only (**no DROP / ALTER TYPE / RENAME**). The pre-existing Phase‑1 inventory WIP was not touched.
+- **Backend:** `PurchaseOrderService.ts` (create / receive / status-derivation / serialize / PO-number gen) + thin `purchase-orders.routes.ts` (the 7 endpoints in §6), registered at `/v1/purchase-orders`. Receiving is the atomic `$transaction` of §5. Unit suite `PurchaseOrderService.test.ts` **23/23**.
+- **Desktop:** `/purchasing` (list + status chips + supplier/branch filter + search), `/purchasing/new` (builder), `/purchasing/[id]` (detail + receive + receipt history), all admin+manager-gated (`canManagePurchasing`); online-only hooks `usePurchaseOrders` / `usePurchaseOrder` / `usePurchaseOrderMutations`; components `PurchaseOrderTable` / `POStatusBadge` / `ReceiveGoodsModal` / `ReceiptHistory`; nav entry in `Sidebar.tsx`. Receiving invalidates `products` / `low-stock` / `movements` / `suppliers-summary` so new stock + ledger surface immediately.
+
+**Deviations from the spec below:** none material. The optional `receipt_hash` (§7.7 / §11) was implemented (desktop mints one per modal-open for double-submit safety). Draft *line editing* via `PATCH` exists server-side but the desktop builder covers creation only — editing a draft's lines in the UI is deferred (not required for the flow).
+
+**Step 6 (4A follow-up):** because of the `Restrict` FK, the supplier `DELETE` route now maps the Prisma `P2003` FK violation to a **409** with a clear message; the desktop delete-confirm copy warns that a PO-linked supplier can't be deleted. See [`DESKTOP_SUPPLIERS.md`](DESKTOP_SUPPLIERS.md).
 
 ---
 

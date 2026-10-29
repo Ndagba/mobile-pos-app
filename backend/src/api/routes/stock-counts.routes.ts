@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../../lib/prisma';
+import { Prisma } from '@prisma/client';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { catchAsync, AppError } from '../../utils/errorHandler';
 import { AuditService } from '../../services/AuditService';
@@ -27,7 +28,7 @@ router.post('/', catchAsync(async (req: Request, res: Response) => {
 
   // Pre-populate StockCountItem with all active products in this branch
   const products = await prisma.product.findMany({
-    where: { branch_id, is_active: true }
+    where: { branch_id, is_active: true, item_type: 'PRODUCT' }
   });
 
   if (products.length > 0) {
@@ -38,7 +39,7 @@ router.post('/', catchAsync(async (req: Request, res: Response) => {
       return {
         stock_count_id: count.id,
         product_id: p.id,
-        system_quantity: inv ? inv.quantity_on_hand : BigInt(0),
+        system_quantity: inv ? inv.quantity_on_hand : new Prisma.Decimal(0),
         physical_quantity: null,
         variance: null
       };
@@ -95,7 +96,7 @@ router.get('/:id', catchAsync(async (req: Request, res: Response) => {
 
   if (!count) throw new AppError(404, 'Stock count not found');
 
-  // Convert BigInts
+  // Decimal quantities serialize as ordinary numeric values for the API.
   const data = {
     ...count,
     items: count.items.map(i => ({
@@ -118,11 +119,13 @@ router.patch('/:id/items', catchAsync(async (req: Request, res: Response) => {
 
   const results = await Promise.all(items.map(async item => {
     // Get current system quantity
+    const product = await prisma.product.findUnique({ where: { id: item.product_id }, select: { item_type: true } });
+    if (!product || product.item_type === 'SERVICE') throw new AppError(400, 'Stock counts apply to physical products only');
     const inventory = await prisma.inventory.findUnique({ where: { product_id: item.product_id } });
-    const systemQty = inventory ? inventory.quantity_on_hand : BigInt(0);
+    const systemQty = inventory ? inventory.quantity_on_hand : new Prisma.Decimal(0);
 
     const variance = item.physical_quantity !== undefined && item.physical_quantity !== null
-      ? BigInt(item.physical_quantity) - systemQty
+      ? new Prisma.Decimal(item.physical_quantity).minus(systemQty)
       : null;
 
     // Check if item exists
@@ -134,7 +137,7 @@ router.patch('/:id/items', catchAsync(async (req: Request, res: Response) => {
       return prisma.stockCountItem.update({
         where: { id: existing.id },
         data: {
-          physical_quantity: item.physical_quantity !== undefined ? BigInt(item.physical_quantity) : null,
+          physical_quantity: item.physical_quantity !== undefined ? new Prisma.Decimal(item.physical_quantity) : null,
           variance,
           notes: item.notes
         }
@@ -145,7 +148,7 @@ router.patch('/:id/items', catchAsync(async (req: Request, res: Response) => {
           stock_count_id: countId,
           product_id: item.product_id,
           system_quantity: systemQty,
-          physical_quantity: item.physical_quantity !== undefined ? BigInt(item.physical_quantity) : null,
+          physical_quantity: item.physical_quantity !== undefined ? new Prisma.Decimal(item.physical_quantity) : null,
           variance,
           notes: item.notes
         }
@@ -178,8 +181,8 @@ router.post('/:id/accept', catchAsync(async (req: Request, res: Response) => {
 
   for (const item of count.items) {
     if (item.physical_quantity != null) {
-      const variance = item.physical_quantity - item.system_quantity;
-      if (variance !== BigInt(0)) {
+      const variance = new Prisma.Decimal(item.physical_quantity).minus(item.system_quantity);
+      if (!variance.equals(0)) {
         await prisma.inventory.update({
           where: { product_id: item.product_id },
           data: { quantity_on_hand: item.physical_quantity }

@@ -24,7 +24,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs dec
 - [x] **Totals** — compute client-side identically to `cartSlice.recalculateTotals` (server trusts client math) — **extracted to `shared/utils/cart.ts` in Phase 1**, unit-tested against mobile arithmetic.
 
 ## 🧩 Backend extensions required (create only when the phase needs them)
-- [~] **Procurement (Phase 4):** `PurchaseOrder`, `PurchaseOrderItem`, `GoodsReceipt`(+`Item`) models + routes; wire receiving to a **`purchase`-type `InventoryMovement`** stock-in (none exists today). **Fully specified in [`DESKTOP_PROCUREMENT_DESIGN.md`](DESKTOP_PROCUREMENT_DESIGN.md) (4B); NOT built — awaiting approval.**
+- [x] **Procurement (Phase 4B):** `PurchaseOrder`, `PurchaseOrderItem`, `GoodsReceipt`(+`Item`) models + routes; receiving wired to a **`purchase`-type `InventoryMovement`** stock-in (the first code that writes one). **Built 2026‑09‑07** — additive migration, `PurchaseOrderService` + `/v1/purchase-orders*` routes, desktop `/purchasing` UI. See [`DESKTOP_PROCUREMENT_DESIGN.md`](DESKTOP_PROCUREMENT_DESIGN.md).
 - [ ] **`SyncDevice` registry (Phase 5):** replace the loose `device_id` string with a real device table + endpoints.
 - [ ] **Inter-branch stock transfer route (Phase 3/5):** movement type exists, endpoint doesn't.
 - [ ] **(Optional) server-side validation:** adopt a schema validator (Joi already a dependency, unused).
@@ -79,8 +79,8 @@ Admin+manager only (cashiers redirected). Product-centric catalog reusing `GET /
 - [ ] **Store-scope `GET /v1/inventory/expiring`** — `InventoryService.getExpiringBatches` returns batches across *all* stores. Desktop ships a warning banner; the real fix is to filter by `store_id`/authorized branches. **Recommended follow-up.**
 - [ ] **`PATCH /v1/inventory/:productId`** has **no role/branch gate** (desktop gates admin+manager in UI only) and **does not write the movement ledger** — direct adjustments won't appear in a product's ledger (only stock-count reconciliation and sales do). Consider writing an `adjustment` movement + a server-side role/branch check.
 
-## Phase 4 — Suppliers & Procurement  `[~]`  split 4A (build) / 4B (design-only) / 4C (docs) per approval 2026‑08‑24
-Approved split: **4A = build the Suppliers/AP UI on the existing backend (zero backend/shared/mobile/prisma change); 4B = design doc only; STOP for approval before implementing 4B** (brief §29).
+## Phase 4 — Suppliers & Procurement  `[~]`  4A built (2026‑08‑24), 4B built (2026‑09‑07); live E2E pending a backend run
+Approved split: **4A = build the Suppliers/AP UI on the existing backend (zero backend/shared/mobile/prisma change); 4B = design doc, then built after separate approval** (brief §29). 4B approval given 2026‑09‑07 ("Approve & build 4B").
 
 ### 4A — Desktop Suppliers + Accounts Payable UI  `[~]`  implementation complete + all hermetic gates green 2026‑08‑24; live scenarios pending a backend run
 - [x] Supplier CRUD (reuse `/v1/suppliers`, store-isolated) — directory with client search + tag chips (All/Preferred/Blocked), create/edit/**hard delete** (admin+manager). (`app/(app)/suppliers/{layout,page}.tsx`, `components/suppliers/{SupplierTable,SupplierFormModal}.tsx`, `hooks/{useSuppliers,useSupplierMutations}.ts`, `lib/roles.canManageSuppliers`)
@@ -92,12 +92,18 @@ Approved split: **4A = build the Suppliers/AP UI on the existing backend (zero b
 **⚠️ Backend caveat surfaced (NOT fixed — inherited from `/v1/suppliers*`):**
 - [ ] **`DELETE /suppliers/:id/payments/:paymentId` does not roll back the linked invoice's status.** Verified live 2026‑08‑25: after deleting the only payment on a `partial` invoice, the invoice **stayed `partial`** while its paid total correctly returned to ₦0. `POST /payments` recomputes/advances the status; `DELETE` does not. The desktop UI can't fix this server-side, so the inline status select is the manual correction. Real fix = recompute the invoice's status on payment delete. Corrected the earlier wrong "recording/deleting rolls status" claim in [`DESKTOP_SUPPLIERS.md`](DESKTOP_SUPPLIERS.md) §3/§4/§5.
 
-### 4B — Procurement (PO → receive → stock-in)  `[!]`  **DESIGN DOC ONLY — awaiting approval before any implementation**
+### 4B — Procurement (PO → receive → stock-in)  `[~]`  **BUILT 2026‑09‑07 — all hermetic gates green; live E2E pending a backend run**
+Approved 2026‑09‑07 ("Approve & build 4B"). Confirmed decisions: AP invoice on receipt **off by default, opt-in `create_invoice:true`** (nullable `PurchaseInvoice.purchase_order_id`); **over-receipt allowed + flagged** (stock rises by the real amount); **`cost_price` left untouched** on receive; **server-only PO math — no `@jaypos/shared` change**; supplier FK `onDelete: Restrict`; line *quantities* locked after `ordered` (notes/expected_date still editable); `po_number` client-supplied with server `@@unique` + fallback generation.
 - [x] Design spec written → [`DESKTOP_PROCUREMENT_DESIGN.md`](DESKTOP_PROCUREMENT_DESIGN.md): 4 additive Prisma models (`PurchaseOrder`, `PurchaseOrderItem`, `GoodsReceipt`, `GoodsReceiptItem`), derived state machine, receiving as an atomic `$transaction` that increments `Inventory.quantity_on_hand` + writes one `purchase`-type `InventoryMovement` per line, 7-route API surface, RBAC/scoping, desktop UI plan, additive migration + SQLite note, test plan, open decisions.
-- [ ] **STOP — get explicit approval before implementing 4B** (brief §29). Then, in order: additive migration → backend routes/service → desktop PO/receive/stock-in UI + supplier history.
-- [ ] **Backend (on approval):** add `PurchaseOrder` / `PurchaseOrderItem` / `GoodsReceipt` / `GoodsReceiptItem` + routes + **additive** migration (no edits to the pre-existing Phase‑1 inventory WIP).
-- [ ] **Backend (on approval):** receiving increments inventory via `purchase`-type `InventoryMovement`.
-- [ ] Desktop PO → receive → stock-in workflow + supplier history.
+- [x] **Approval received 2026‑09‑07.**
+- [x] **Backend:** `PurchaseOrder` / `PurchaseOrderItem` / `GoodsReceipt` / `GoodsReceiptItem` models + **additive** migration (`20260907140000_add_purchase_orders`: 4 `CREATE TABLE`, 1 nullable `ADD COLUMN "purchase_order_id"`, FK back-refs — **no DROP/ALTER TYPE/RENAME**; pre-existing Phase‑1 inventory WIP untouched). Logic in `PurchaseOrderService.ts`, thin routes in `purchase-orders.routes.ts` (`GET /`, `POST /`, `GET /:id`, `PATCH /:id`, `DELETE /:id`, `POST /:id/receipts`, `GET /:id/receipts`), registered in `index.ts`.
+- [x] **Backend:** receiving increments inventory via a `purchase`-type `InventoryMovement` (one per line, `reference_id` = goods-receipt id) inside the same `$transaction` — mirror image of the sales stock decrement. `receipt_hash` idempotency returns the existing receipt without touching stock; opt-in `create_invoice` links an unpaid `PurchaseInvoice` to the PO; batch/expiry upserts `BatchTracking`.
+- [x] **Backend unit suite:** `PurchaseOrderService.test.ts` **23/23** (hermetic `mockPrisma`) — incl. the load-bearing "one `purchase` movement per line + `quantity_on_hand` increment", partial/over-receipt, `receipt_hash` idempotency, opt-in invoice, batch upsert, RBAC 403s, cross-store 404.
+- [x] **Desktop PO → receive → stock-in UI + supplier history:** `/purchasing` (list + status chips w/ counts + supplier/branch filter + search), `/purchasing/new` (branch+supplier+line builder w/ live totals), `/purchasing/[id]` (submit/cancel/delete + receive + receipt history). Admin+manager gated (`canManagePurchasing`, cashier redirect); online-only React-Query hooks (`usePurchaseOrders`/`usePurchaseOrder`/`usePurchaseOrderMutations`), PO wire types local to the hooks (not shared); receiving invalidates the inventory caches so new stock + ledger show immediately. Nav entry added to `Sidebar.tsx`.
+- [x] ✅ Hermetic gates: **backend build ✓ + PO unit 23/23** · **shared vitest 33/33** (unchanged — no shared edits) · **mobile tests 20/20** (unchanged) · **desktop typecheck clean** · **desktop build ✓ (17 routes, Next 14.2.35** — new `/purchasing`, `/purchasing/new`, `/purchasing/[id]`**)**.
+- [ ] **Live E2E — PENDING a running backend + active-subscription store** (none reachable in the build env, as with prior phases): raise PO → submit (`ordered`) → partial receive → confirm `quantity_on_hand` rose by received qty **and** a `purchase` `InventoryMovement` appears in the product ledger → receive remainder → status `received` → (opt-in) AP invoice created + payable via the 4A ledger → cashier redirected away from `/purchasing`.
+
+**Step 6 (4A follow-up done this phase):** `PurchaseOrder.supplier` is `onDelete: Restrict`, so a supplier referenced by any PO can no longer be hard-deleted. The supplier `DELETE` route now catches the Prisma FK violation (`P2003`) and returns a clear **409** ("This supplier has purchase orders and can't be deleted…") instead of a generic 500; the desktop delete-confirm copy warns up-front. Documented in [`DESKTOP_SUPPLIERS.md`](DESKTOP_SUPPLIERS.md).
 
 ## Phase 5 — Analytics & Administration  `[ ]`
 - [ ] Dashboard (reuse `/v1/analytics/dashboard`) + KPIs incl. outstanding sync count.
@@ -121,7 +127,7 @@ Approved split: **4A = build the Suppliers/AP UI on the existing backend (zero b
 - [x] `DESKTOP_OFFLINE_SYNC.md` — hybrid sync model, idempotency, triggers (Phase 2).
 - [x] `DESKTOP_INVENTORY.md` — inventory endpoints, role/branch model, caveats (Phase 3).
 - [x] `DESKTOP_SUPPLIERS.md` — Suppliers/AP UI, contract, parity decisions, caveats (Phase 4A).
-- [x] `DESKTOP_PROCUREMENT_DESIGN.md` — PO/receiving spec, **design-only, not yet built** (Phase 4B).
+- [x] `DESKTOP_PROCUREMENT_DESIGN.md` — PO/receiving spec + **as-built notes** (Phase 4B, built 2026‑09‑07).
 - [ ] `DESKTOP_DEPLOYMENT.md`
 
 ## Definition of done (per success criteria)

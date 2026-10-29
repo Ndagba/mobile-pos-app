@@ -1,9 +1,11 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { isOutOfStock } from '@jaypos/shared';
 import { useProducts } from '@/hooks/useProducts';
 import { useCartStore } from '@/store/cartStore';
+import { useBranchStore } from '@/store/branchStore';
 import { ProductSearch } from '@/components/pos/ProductSearch';
 import { CategoryTabs } from '@/components/pos/CategoryTabs';
 import { ProductGrid } from '@/components/pos/ProductGrid';
@@ -23,8 +25,10 @@ import { useSyncStore } from '@/store/syncStore';
 export default function SalesPage() {
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<string | undefined>(undefined);
-  const productsQ = useProducts({ categoryId });
+  const selectedBranchId = useBranchStore((s) => s.selectedBranchId);
+  const productsQ = useProducts({ categoryId, branchId: selectedBranchId ?? undefined });
   const addItem = useCartStore((s) => s.addItem);
+  const queryClient = useQueryClient();
 
   const all = useMemo(() => productsQ.data ?? [], [productsQ.data]);
   const q = search.trim().toLowerCase();
@@ -49,6 +53,13 @@ export default function SalesPage() {
     }
   };
 
+  const handleSaleCompleted = async () => {
+    // Refresh pending sync count
+    await useSyncStore.getState().refreshPendingCount();
+    // Force immediate refetch of product list to update stock counts
+    await queryClient.refetchQueries({ queryKey: ['products'] });
+  };
+
   return (
     <div className="flex h-full gap-6">
       <section className="flex min-w-0 flex-1 flex-col gap-4">
@@ -60,7 +71,7 @@ export default function SalesPage() {
       </section>
       <aside className="flex w-[360px] shrink-0 xl:w-[400px]">
         <CartPanel>
-          <Checkout onCompleted={() => void useSyncStore.getState().refreshPendingCount()} />
+          <Checkout onCompleted={handleSaleCompleted} />
         </CartPanel>
       </aside>
     </div>

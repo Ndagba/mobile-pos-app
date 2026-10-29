@@ -8,8 +8,11 @@ export function Spinner({ className }: { className?: string }) {
 /** Centered full-viewport spinner, used while the session hydrates. */
 export function FullscreenSpinner() {
   return (
-    <div className="flex h-screen items-center justify-center">
-      <Spinner className="h-8 w-8" />
+    <div className="flex h-screen w-screen items-center justify-center bg-background">
+      <div className="flex flex-col items-center gap-2">
+        <Spinner className="h-12 w-12 text-primary" />
+        <p className="text-sm text-muted-foreground">Loading session...</p>
+      </div>
     </div>
   );
 }

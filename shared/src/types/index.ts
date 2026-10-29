@@ -11,7 +11,13 @@
 export type ItemType = 'PRODUCT' | 'SERVICE';
 
 /** Payment methods accepted by the backend transaction routes. */
-export type PaymentMethod = 'cash' | 'card' | 'mobile_wallet';
+export type PaymentMethod = 'cash' | 'card' | 'transfer' | 'split';
+
+export interface SplitPaymentAllocations {
+  cash: number;
+  card: number;
+  transfer: number;
+}
 
 /** Standard backend success envelope: `{ status: 'success', data: T }`. */
 export interface ApiEnvelope<T> {
@@ -67,6 +73,7 @@ export interface TransactionInput {
   discount_amount: number;
   total_amount: number;
   payment_method: PaymentMethod | string;
+  payment_splits?: SplitPaymentAllocations;
   items: TransactionItem[];
 }
 
@@ -121,6 +128,16 @@ export interface Category {
   _count?: { products: number };
 }
 
+/** Physical shop storage location (e.g. Shelf A1, Rack 1, Refrigerator). */
+export interface Location {
+  id: string;
+  name: string;
+  description?: string | null;
+  is_active?: boolean;
+  branch_id?: string | null;
+  _count?: { products: number };
+}
+
 /**
  * Product shape shared across screens and the offline cache.
  *
@@ -143,6 +160,8 @@ export interface Product {
   item_type?: ItemType;
   category_id?: string | null;
   category?: Category | null;
+  location_id?: string | null;
+  location?: Location | null;
   unit?: string | null;
   description?: string | null;
   image_url?: string | null;
@@ -168,6 +187,9 @@ export interface Customer {
   last_name?: string;
   phone?: string | null;
   email?: string | null;
+  tag?: string;
+  created_at?: string;
+  notes?: string;
   credit_limit?: number | null;
   total_spent?: number;
   transaction_count?: number;

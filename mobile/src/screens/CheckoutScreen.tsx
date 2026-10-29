@@ -24,6 +24,7 @@ import { useResponsive, responsiveSpacing, responsiveFontSize } from '../utils/r
 import CustomerSearchModal from '../components/CustomerSearchModal';
 import BarcodeScannerModal from '../components/BarcodeScannerModal';
 import type { Customer } from '../redux/slices/customersSlice';
+import { tracksInventory, getAvailableStock, isOutOfStock, canIncrementQuantity } from '../utils/inventory';
 
 type PaymentMethod = 'cash' | 'card' | 'mobile_wallet';
 interface Branch { id: string; name: string; is_active: boolean; }
@@ -41,6 +42,13 @@ const PAY_OPTIONS: { id: PaymentMethod; label: string; icon: string }[] = [
 ];
 
 const BRANCH_ALL_ID = '__all__';
+
+type ItemTypeFilter = 'ALL' | 'PRODUCT' | 'SERVICE';
+const TYPE_FILTERS: { key: ItemTypeFilter; label: string }[] = [
+  { key: 'ALL',     label: 'All'      },
+  { key: 'PRODUCT', label: 'Products' },
+  { key: 'SERVICE', label: 'Services' },
+];
 
 // ─── Icon button ──────────────────────────────────────────────
 const IconBtn = ({ icon, onPress }: { icon: string; onPress?: () => void }) => (
@@ -111,6 +119,7 @@ export default function CheckoutScreen() {
   const [selectedPayment, setSelectedPayment] = useState<PaymentMethod | null>(null);
   const [processing,      setProcessing]      = useState(false);
   const [searchQuery,     setSearchQuery]      = useState('');
+  const [typeFilter,      setTypeFilter]        = useState<ItemTypeFilter>('ALL');
   const [products,        setProducts]         = useState<any[]>([]);
   const [receipt,         setReceipt]          = useState<ReceiptData | null>(null);
   const [branches,        setBranches]         = useState<Branch[]>([]);
@@ -204,23 +213,23 @@ export default function CheckoutScreen() {
 
   const handleAdd    = (p: any) => {
     if (!p?.id || !p?.name) { Alert.alert('Error', 'Product data missing'); return; }
-    const stock = Number(p.inventory?.quantity_on_hand ?? 0);
-    if (stock <= 0) {
+    // Eligibility is based on item type + stock-tracking capability, not raw stock:
+    // a service (which has no inventory row) is always sellable.
+    if (isOutOfStock(p)) {
       Alert.alert('Out of Stock', `${p.name} is out of stock`);
       return;
     }
     const inCart = cart.items.find(c => c.product_id === p.id);
-    if (inCart && inCart.quantity >= stock) {
-      Alert.alert('Limit Reached', `Only ${stock} units available in stock`);
+    if (inCart && !canIncrementQuantity(p, inCart.quantity)) {
+      Alert.alert('Limit Reached', `Only ${getAvailableStock(p)} units available in stock`);
       return;
     }
-    dispatch(addItem({ product_id: p.id, product_name: p.name, quantity: 1, unit_price: Number(p.effective_price) || 0, tax_rate: Number(p.tax_rate) || 0 }));
+    dispatch(addItem({ product_id: p.id, product_name: p.name, quantity: 1, unit_price: Number(p.effective_price) || 0, tax_rate: Number(p.tax_rate) || 0, item_type: tracksInventory(p) ? 'PRODUCT' : 'SERVICE' }));
   };
   const handleInc    = (id: string, qty: number) => {
     const product = products.find(p => p.id === id);
-    const stock = Number(product?.inventory?.quantity_on_hand ?? 0);
-    if (qty >= stock) {
-      Alert.alert('Limit Reached', `Only ${stock} units available in stock`);
+    if (!canIncrementQuantity(product, qty)) {
+      Alert.alert('Limit Reached', `Only ${getAvailableStock(product)} units available in stock`);
       return;
     }
     dispatch(updateQuantity({ product_id: id, quantity: qty + 1 }));
@@ -293,7 +302,7 @@ export default function CheckoutScreen() {
         cart.items.forEach(it => {
           const product = products.find(p => p.id === it.product_id);
           const onHand = Number(product?.inventory?.quantity_on_hand);
-          if (Number.isFinite(onHand)) {
+          if (tracksInventory(product) && Number.isFinite(onHand)) {
             NotificationService.checkLowStock(it.product_name, onHand - it.quantity);
           }
         });
@@ -338,14 +347,47 @@ export default function CheckoutScreen() {
     }
   };
 
-  const filtered   = products.filter(p => !searchQuery || p.name?.toLowerCase().includes(searchQuery.toLowerCase()) || p.sku?.toLowerCase().includes(searchQuery.toLowerCase()));
+  const searchFiltered = products.filter(p => !searchQuery || p.name?.toLowerCase().includes(searchQuery.toLowerCase()) || p.sku?.toLowerCase().includes(searchQuery.toLowerCase()));
+  const productCount = searchFiltered.filter(p => tracksInventory(p)).length;
+  const serviceCount = searchFiltered.length - productCount;
+  const typeCounts: Record<ItemTypeFilter, number> = { ALL: searchFiltered.length, PRODUCT: productCount, SERVICE: serviceCount };
+  const filtered   = typeFilter === 'ALL'
+    ? searchFiltered
+    : searchFiltered.filter(p => typeFilter === 'PRODUCT' ? tracksInventory(p) : !tracksInventory(p));
   const cartCount  = cart.items.reduce((s, i) => s + i.quantity, 0);
+  const emptyMessage =
+    products.length === 0    ? 'No products — add them in Inventory'
+    : searchQuery            ? `No results for "${searchQuery}"`
+    : typeFilter === 'SERVICE' ? 'No services yet'
+    : typeFilter === 'PRODUCT' ? 'No products yet'
+    : 'No items';
   const activeBranch = branches.length === 1
     ? branches[0].name
     : (isAdmin
         ? (selectedBranchId ? branches.find(b => b.id === selectedBranchId)?.name : null)
         : user?.branch_name ?? null
       );
+
+  // Item-type filter bar (All / Products / Services) with live counts —
+  // shared by the tablet and phone layouts as the product grid's list header.
+  const renderTypeFilter = () => (
+    <View style={s.typeFilterRow}>
+      {TYPE_FILTERS.map(f => {
+        const active = typeFilter === f.key;
+        return (
+          <TouchableOpacity
+            key={f.key}
+            onPress={() => setTypeFilter(f.key)}
+            activeOpacity={0.75}
+            style={[s.typeChip, active && s.typeChipActive]}
+          >
+            <Text style={[s.typeChipCount, active && s.typeChipCountActive]}>{typeCounts[f.key]}</Text>
+            <Text style={[s.typeChipLabel, active && s.typeChipLabelActive]}>{f.label}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
 
   // ── Tablet layout with side-by-side product + cart ────
   if (isTablet) {
@@ -388,10 +430,13 @@ export default function CheckoutScreen() {
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xl }}
             columnWrapperStyle={{ gap: spacing.md }}
+            ListHeaderComponent={renderTypeFilter()}
             ItemSeparatorComponent={() => <View style={{ height: spacing.md }} />}
             renderItem={({ item }) => {
               const inCart = cart.items.find(c => c.product_id === item.id);
-              const stock = Number(item.inventory?.quantity_on_hand ?? 0);
+              const isService = !tracksInventory(item);
+              const stock = getAvailableStock(item);
+              const outOfStock = isOutOfStock(item);
               const isLow = stock <= 10;
               const tone = getCategoryTone(item.category?.name);
               return (
@@ -402,13 +447,13 @@ export default function CheckoutScreen() {
                       <Text style={[s.prodCatLabel, { color: tone, fontSize: fontSize.xs }]} numberOfLines={1}>
                         {item.category?.name ?? ''}
                       </Text>
-                      {isLow && stock > 0 && <View style={s.lowBadge}><Text style={[s.lowText, { fontSize: fontSize.xs }]}>LOW</Text></View>}
+                      {isService ? <View style={s.lowBadge}><Text style={[s.lowText, { fontSize: fontSize.xs }]}>SERVICE</Text></View> : isLow && stock > 0 && <View style={s.lowBadge}><Text style={[s.lowText, { fontSize: fontSize.xs }]}>LOW</Text></View>}
                     </View>
                     <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', minHeight: 50 }}>
                       <View style={{ flex: 1 }}>
                         <Text style={[s.prodName, { fontSize: fontSize.base }]} numberOfLines={2}>{item.name}</Text>
                         <Text style={{ fontSize: 11, color: stock > 0 ? C.muted : '#FB7185', fontWeight: stock > 0 ? 'normal' : '700', marginTop: 4 }}>
-                          {stock > 0 ? `Stock: ${stock}` : 'Out of Stock'}
+                          {isService ? 'Service' : stock > 0 ? `Stock: ${stock}` : 'Out of Stock'}
                         </Text>
                       </View>
                       {item.image_url && (
@@ -424,12 +469,12 @@ export default function CheckoutScreen() {
                         {(Number(item.effective_price) || 0).toLocaleString()}
                       </Text>
                       {!inCart ? (
-                        <TouchableOpacity 
-                          onPress={() => handleAdd(item)} 
-                          style={[s.addBtn, stock <= 0 ? { backgroundColor: C.border } : null]}
-                          disabled={stock <= 0}
+                        <TouchableOpacity
+                          onPress={() => handleAdd(item)}
+                          style={[s.addBtn, outOfStock ? { backgroundColor: C.border } : null]}
+                          disabled={outOfStock}
                         >
-                          <MaterialCommunityIcons name="plus" size={18} color={stock > 0 ? C.accentFg : C.muted} />
+                          <MaterialCommunityIcons name="plus" size={18} color={outOfStock ? C.muted : C.accentFg} />
                         </TouchableOpacity>
                       ) : (
                         <View style={s.qtyRow}>
@@ -437,10 +482,10 @@ export default function CheckoutScreen() {
                             <MaterialCommunityIcons name="minus" size={14} color={C.accent} />
                           </TouchableOpacity>
                           <Text style={[s.qtyNum, { fontSize: fontSize.sm }]}>{inCart.quantity}</Text>
-                          <TouchableOpacity 
-                            onPress={() => handleInc(item.id, inCart.quantity)} 
-                            style={[s.qtyBtn, inCart.quantity >= stock ? { opacity: 0.5 } : null]}
-                            disabled={inCart.quantity >= stock}
+                          <TouchableOpacity
+                            onPress={() => handleInc(item.id, inCart.quantity)}
+                            style={[s.qtyBtn, !canIncrementQuantity(item, inCart.quantity) ? { opacity: 0.5 } : null]}
+                            disabled={!canIncrementQuantity(item, inCart.quantity)}
                           >
                             <MaterialCommunityIcons name="plus" size={14} color={C.accent} />
                           </TouchableOpacity>
@@ -455,7 +500,7 @@ export default function CheckoutScreen() {
               <View style={s.empty}>
                 <MaterialCommunityIcons name="package-variant-closed" size={36} color={C.border} />
                 <Text style={[s.emptyText, { fontSize: fontSize.base }]}>
-                  {products.length === 0 ? 'No products — add them in Inventory' : `No results for "${searchQuery}"`}
+                  {emptyMessage}
                 </Text>
               </View>
             }
@@ -477,8 +522,10 @@ export default function CheckoutScreen() {
               <View style={{ paddingHorizontal: spacing.lg, paddingVertical: spacing.md }}>
                 {cart.items.map((it, i) => {
                   const product = products.find(p => p.id === it.product_id);
-                  const stock = Number(product?.inventory?.quantity_on_hand ?? 0);
-                  const cannotInc = it.quantity >= stock;
+                  // A service line stays incrementable even when the catalog isn't loaded
+                  // (branch filter / offline) — fall back to the cart item's own item_type.
+                  const isService = product ? !tracksInventory(product) : !tracksInventory(it);
+                  const cannotInc = !isService && it.quantity >= getAvailableStock(product);
                   return (
                     <View key={it.product_id} style={[i < cart.items.length - 1 && { borderBottomWidth: 1, borderBottomColor: C.border, paddingBottom: spacing.md }]}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.md }}>
@@ -813,18 +860,12 @@ export default function CheckoutScreen() {
         contentContainerStyle={{ paddingHorizontal: S.xl, paddingBottom: cartCount > 0 ? 260 : 180 }}
         columnWrapperStyle={{ gap: 10 }}
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-        ListHeaderComponent={
-          <View style={s.productsHeader}>
-            <Text style={s.productsEyebrow}>{filtered.length} PRODUCTS</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <MaterialCommunityIcons name="filter-outline" size={12} color={C.muted} />
-              <Text style={s.filterBtnText}>All</Text>
-            </View>
-          </View>
-        }
+        ListHeaderComponent={renderTypeFilter()}
         renderItem={({ item }) => {
           const inCart = cart.items.find(c => c.product_id === item.id);
-          const stock = Number(item.inventory?.quantity_on_hand ?? 0);
+          const isService = !tracksInventory(item);
+          const stock = getAvailableStock(item);
+          const outOfStock = isOutOfStock(item);
           const isLow  = stock <= 10;
           const tone   = getCategoryTone(item.category?.name);
           return (
@@ -837,14 +878,14 @@ export default function CheckoutScreen() {
                   <Text style={[s.prodCatLabel, { color: tone }]} numberOfLines={1}>
                     {item.category?.name ?? ''}
                   </Text>
-                  {isLow && stock > 0 && <View style={s.lowBadge}><Text style={s.lowText}>LOW</Text></View>}
+                  {isService ? <View style={s.lowBadge}><Text style={s.lowText}>SERVICE</Text></View> : isLow && stock > 0 && <View style={s.lowBadge}><Text style={s.lowText}>LOW</Text></View>}
                 </View>
                 <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', minHeight: 50 }}>
                   <View style={{ flex: 1 }}>
                     {/* Product name */}
                     <Text style={s.prodName} numberOfLines={2}>{item.name}</Text>
                     <Text style={{ fontSize: 11, color: stock > 0 ? C.muted : '#FB7185', fontWeight: stock > 0 ? 'normal' : '700', marginTop: 4 }}>
-                      {stock > 0 ? `Stock: ${stock}` : 'Out of Stock'}
+                      {isService ? 'Service' : stock > 0 ? `Stock: ${stock}` : 'Out of Stock'}
                     </Text>
                   </View>
                   {item.image_url && (
@@ -861,12 +902,12 @@ export default function CheckoutScreen() {
                     {(Number(item.effective_price) || 0).toLocaleString()}
                   </Text>
                   {!inCart ? (
-                    <TouchableOpacity 
-                      onPress={() => handleAdd(item)} 
-                      style={[s.addBtn, stock <= 0 ? { backgroundColor: C.border } : null]}
-                      disabled={stock <= 0}
+                    <TouchableOpacity
+                      onPress={() => handleAdd(item)}
+                      style={[s.addBtn, outOfStock ? { backgroundColor: C.border } : null]}
+                      disabled={outOfStock}
                     >
-                      <MaterialCommunityIcons name="plus" size={16} color={stock > 0 ? C.accentFg : C.muted} />
+                      <MaterialCommunityIcons name="plus" size={16} color={outOfStock ? C.muted : C.accentFg} />
                     </TouchableOpacity>
                   ) : (
                     <View style={s.qtyRow}>
@@ -874,10 +915,10 @@ export default function CheckoutScreen() {
                         <MaterialCommunityIcons name="minus" size={14} color={C.accent} />
                       </TouchableOpacity>
                       <Text style={s.qtyNum}>{inCart.quantity}</Text>
-                      <TouchableOpacity 
-                        onPress={() => handleInc(item.id, inCart.quantity)} 
-                        style={[s.qtyBtn, inCart.quantity >= stock ? { opacity: 0.5 } : null]}
-                        disabled={inCart.quantity >= stock}
+                      <TouchableOpacity
+                        onPress={() => handleInc(item.id, inCart.quantity)}
+                        style={[s.qtyBtn, !canIncrementQuantity(item, inCart.quantity) ? { opacity: 0.5 } : null]}
+                        disabled={!canIncrementQuantity(item, inCart.quantity)}
                       >
                         <MaterialCommunityIcons name="plus" size={14} color={C.accent} />
                       </TouchableOpacity>
@@ -892,7 +933,7 @@ export default function CheckoutScreen() {
           <View style={s.empty}>
             <MaterialCommunityIcons name="package-variant-closed" size={36} color={C.border} />
             <Text style={s.emptyText}>
-              {products.length === 0 ? 'No products — add them in Inventory' : `No results for "${searchQuery}"`}
+              {emptyMessage}
             </Text>
           </View>
         }
@@ -908,8 +949,10 @@ export default function CheckoutScreen() {
           <ScrollView style={{ maxHeight: 200, marginBottom: 12 }} showsVerticalScrollIndicator={false}>
             {cart.items.map(it => {
               const product = products.find(p => p.id === it.product_id);
-              const stock = Number(product?.inventory?.quantity_on_hand ?? 0);
-              const cannotInc = it.quantity >= stock;
+              // A service line stays incrementable even when the catalog isn't loaded
+              // (branch filter / offline) — fall back to the cart item's own item_type.
+              const isService = product ? !tracksInventory(product) : !tracksInventory(it);
+              const cannotInc = !isService && it.quantity >= getAvailableStock(product);
               return (
                 <View key={it.product_id} style={s.cartItem}>
                   <View style={s.cartAvatar}>
@@ -1237,16 +1280,21 @@ const s = StyleSheet.create({
   branchOptionActive: { backgroundColor: 'rgba(110,86,247,0.08)' },
   branchOptionText: { flex: 1, fontSize: 13, fontWeight: '600', color: C.ink },
 
-  // Products header row
-  productsHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  // Item-type filter bar (All / Products / Services)
+  typeFilterRow: {
+    flexDirection: 'row', gap: 8,
     paddingVertical: 10, marginBottom: 2,
   },
-  productsEyebrow: {
-    fontSize: 11, fontWeight: '700', letterSpacing: 1,
-    textTransform: 'uppercase', color: C.muted,
+  typeChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: R.pill,
+    backgroundColor: C.card, borderWidth: 1, borderColor: C.border,
   },
-  filterBtnText: { fontSize: 11, fontWeight: '600', color: C.muted },
+  typeChipActive: { backgroundColor: C.accent, borderColor: C.accent },
+  typeChipCount: { fontSize: 13, fontWeight: '800', color: C.accent },
+  typeChipCountActive: { color: C.accentFg },
+  typeChipLabel: { fontSize: 13, fontWeight: '600', color: C.ink },
+  typeChipLabelActive: { color: C.accentFg },
 
   // Product card
   prodCard: {

@@ -2,13 +2,14 @@
 
 import { cn } from '@/lib/utils';
 
-export type InventoryTab = 'all' | 'products' | 'services' | 'categories' | 'low-stock';
+export type InventoryTab = 'all' | 'products' | 'services' | 'categories' | 'locations' | 'low-stock';
 
 export const INVENTORY_TABS: { key: InventoryTab; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'products', label: 'Products' },
   { key: 'services', label: 'Services' },
   { key: 'categories', label: 'Categories' },
+  { key: 'locations', label: 'Location' },
   { key: 'low-stock', label: 'Low Stock' },
 ];
 

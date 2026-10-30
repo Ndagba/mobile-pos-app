@@ -30,6 +30,7 @@ import { MovementLedgerModal } from '@/components/inventory/MovementLedgerModal'
 import { ProductFormModal } from '@/components/inventory/ProductFormModal';
 import { CategoryFormModal } from '@/components/inventory/CategoryFormModal';
 import { LocationFormModal } from '@/components/inventory/LocationFormModal';
+import { LocationProductsModal } from '@/components/inventory/LocationProductsModal';
 
 /**
  * Inventory catalog (admin + manager; the section layout gates cashiers out).
@@ -62,6 +63,7 @@ export default function InventoryPage() {
   const [locationFormOpen, setLocationFormOpen] = useState(false);
   const [locationFormTarget, setLocationFormTarget] = useState<Location | null>(null);
   const [deleteLocation, setDeleteLocation] = useState<Location | null>(null);
+  const [viewLocation, setViewLocation] = useState<Location | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const branchesQ = useBranches();
@@ -295,6 +297,9 @@ export default function InventoryPage() {
             loading={locationsQ.isLoading}
             renderRowActions={(loc) => (
               <div className="flex justify-end gap-1.5">
+                <Button size="sm" variant="ghost" onClick={() => setViewLocation(loc)}>
+                  View
+                </Button>
                 <Button size="sm" variant="ghost" onClick={() => openEditLocation(loc)}>
                   Edit
                 </Button>
@@ -371,6 +376,13 @@ export default function InventoryPage() {
         branches={branches}
         defaultBranchId={branchId}
       />
+      <LocationProductsModal
+        open={viewLocation !== null}
+        onClose={() => setViewLocation(null)}
+        location={viewLocation}
+        products={products}
+      />
+
       <LocationFormModal
         open={locationFormOpen}
         onClose={() => setLocationFormOpen(false)}

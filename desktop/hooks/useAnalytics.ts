@@ -23,58 +23,56 @@ export interface AnalyticsDashboardData {
   }>;
 }
 
-export interface SalesReportData {
-  data: Array<{
-    date: string;
-    revenue: number;
-    transactions: number;
-    items_sold: number;
-    total_cost: number;
-    profit: number;
-  }>;
-}
+/**
+ * Analytics endpoints wrap their payload as `{ status, data }`, and `apiClient.get`
+ * unwraps one level — so these hooks receive the inner `data` directly. For the
+ * list endpoints that is an array (hence the array types below); `/outstanding`
+ * returns an object.
+ */
+export type SalesReportData = Array<{
+  date: string;
+  revenue: number;
+  transactions: number;
+  items_sold: number;
+  total_cost: number;
+  profit: number;
+}>;
 
-export interface ProductPerformanceData {
-  data: Array<{
-    id: string;
-    name: string;
-    total_sold: number;
-    total_revenue: number;
-    transaction_count: number;
-    total_cost: number;
-    total_profit: number;
-  }>;
-}
+export type ProductPerformanceData = Array<{
+  id: string;
+  name: string;
+  sku: string | null;
+  item_type?: string;
+  total_sold: number;
+  total_revenue: number;
+  transaction_count: number;
+  total_cost: number;
+  profit: number;
+}>;
 
-export interface EmployeePerformanceData {
-  data: Array<{
-    userId: string;
-    first_name: string;
-    last_name: string;
-    transaction_count: number;
-    total_revenue: number;
-    avg_transaction: number;
-  }>;
-}
+export type EmployeePerformanceData = Array<{
+  id: string;
+  first_name: string;
+  last_name: string;
+  role: string;
+  transaction_count: number;
+  total_revenue: number;
+  avg_transaction: number;
+}>;
 
+/** `/analytics/outstanding` returns store-wide aggregates only (no per-customer list). */
 export interface DebtData {
   total_outstanding: number;
-  customers: Array<{
-    id: string;
-    first_name: string;
-    last_name: string;
-    balance: number;
-  }>;
+  customers_with_balance: number;
 }
 
-export interface DiscountData {
-  data: Array<{
-    cashier: string;
-    discount_count: number;
-    total_discount: number;
-    associated_revenue: number;
-  }>;
-}
+export type DiscountData = Array<{
+  user_id: string;
+  cashier_name: string;
+  discount_count: number;
+  total_discount: number;
+  associated_revenue: number;
+}>;
 
 export function useAnalytics() {
   return {
@@ -105,12 +103,18 @@ export function useAnalytics() {
         },
       }),
 
-    useEmployeePerformance: (branchId: string) =>
+    useEmployeePerformance: (branchId: string, dateFrom: string, dateTo: string) =>
       useQuery({
-        queryKey: ['analytics-employees', branchId],
+        queryKey: ['analytics-employees', branchId, dateFrom, dateTo],
         queryFn: async () => {
-          const params = branchId ? `?branch_id=${branchId}` : '';
-          return await apiClient.get<EmployeePerformanceData>(`/analytics/employee-performance${params}`);
+          const params = new URLSearchParams();
+          if (branchId) params.set('branch_id', branchId);
+          if (dateFrom) params.set('dateFrom', dateFrom);
+          if (dateTo) params.set('dateTo', dateTo);
+          const qs = params.toString();
+          return await apiClient.get<EmployeePerformanceData>(
+            `/analytics/employee-performance${qs ? `?${qs}` : ''}`
+          );
         },
       }),
 
@@ -123,12 +127,16 @@ export function useAnalytics() {
         },
       }),
 
-    useDiscounts: (branchId: string) =>
+    useDiscounts: (branchId: string, dateFrom: string, dateTo: string) =>
       useQuery({
-        queryKey: ['analytics-discounts', branchId],
+        queryKey: ['analytics-discounts', branchId, dateFrom, dateTo],
         queryFn: async () => {
-          const params = branchId ? `?branch_id=${branchId}` : '';
-          return await apiClient.get<DiscountData>(`/analytics/discounts${params}`);
+          const params = new URLSearchParams();
+          if (branchId) params.set('branch_id', branchId);
+          if (dateFrom) params.set('dateFrom', dateFrom);
+          if (dateTo) params.set('dateTo', dateTo);
+          const qs = params.toString();
+          return await apiClient.get<DiscountData>(`/analytics/discounts${qs ? `?${qs}` : ''}`);
         },
       }),
   };

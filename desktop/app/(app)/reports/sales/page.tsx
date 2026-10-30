@@ -25,7 +25,7 @@ export default function SalesReportPage() {
     );
   }
 
-  const sales = data?.data ?? [];
+  const sales = data ?? [];
 
   return (
     <div className="space-y-6">

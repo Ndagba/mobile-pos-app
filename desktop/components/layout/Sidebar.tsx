@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
-import { canManageInventory, canManageSuppliers, canManagePurchasing } from '@/lib/roles';
+import { canManageInventory, canManageSuppliers, canManagePurchasing, canViewReports } from '@/lib/roles';
 
 interface NavItem {
   label: string;
@@ -47,7 +47,7 @@ const NAV: NavItem[] = [
   { label: 'Suppliers', href: '/suppliers', icon: Truck, visible: canManageSuppliers },
   { label: 'Purchasing', href: '/purchasing', icon: ClipboardList, visible: canManagePurchasing },
   { label: 'Expenses', href: '/admin/expenses', icon: Wallet, visible: canManageInventory },
-  { label: 'Report', href: '/reports', icon: BarChart3, matchPaths: ['/admin/financials'] },
+  { label: 'Report', href: '/reports', icon: BarChart3, matchPaths: ['/admin/financials'], visible: canViewReports },
   { label: 'Settings', href: '/settings', icon: Store, visible: (user) => user?.role === 'admin' || user?.role === 'manager' },
 ];
 

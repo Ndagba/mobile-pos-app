@@ -39,3 +39,13 @@ export function canManageSuppliers(user: RoleBearer): boolean {
 export function canManagePurchasing(user: RoleBearer): boolean {
   return user?.role === 'admin' || user?.role === 'manager' || !!user?.is_super_admin;
 }
+
+/**
+ * Admin or manager: may view the business reports (sales, products, employees,
+ * debt, discounts). Cashiers may not — the analytics endpoints scope by branch,
+ * not by the viewing cashier, so a cashier would otherwise see branch-wide staff,
+ * discount and debt figures. Mirrors mobile, which restricts these tabs likewise.
+ */
+export function canViewReports(user: RoleBearer): boolean {
+  return user?.role === 'admin' || user?.role === 'manager' || !!user?.is_super_admin;
+}

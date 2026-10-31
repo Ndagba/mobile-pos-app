@@ -37,7 +37,10 @@ export function Providers({ children }: { children: ReactNode }) {
   }, [restore]);
 
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
+    // Only register the SW in production. In dev, its stale-while-revalidate
+    // cache can serve outdated chunks for the same (non-content-hashed) dev URLs
+    // after a rebuild, which breaks hot reloads; skipping it avoids that entirely.
+    if (process.env.NODE_ENV === 'production' && 'serviceWorker' in navigator) {
       // Register after load so it never competes with first paint.
       const onLoad = () => {
         navigator.serviceWorker.register('/sw.js').catch(() => {

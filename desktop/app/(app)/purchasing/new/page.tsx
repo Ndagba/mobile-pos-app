@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
+import { PageHeader } from '@/components/ui/page-header';
 
 /** A line under construction — strings for the editable numeric inputs. */
 interface DraftLine {
@@ -139,15 +140,15 @@ export default function NewPurchaseOrderPage() {
 
   return (
     <div className="flex h-full flex-col gap-4">
-      <header>
+      <div>
         <Link
           href="/purchasing"
-          className="mb-1 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          className="mb-1 inline-flex items-center gap-1 text-sm text-text-muted hover:text-ink-2"
         >
           <ArrowLeft className="h-4 w-4" /> Purchasing
         </Link>
-        <h1 className="text-xl font-semibold">New purchase order</h1>
-      </header>
+        <PageHeader title="New purchase order" className="mb-0" />
+      </div>
 
       <div className="min-h-0 flex-1 space-y-5 overflow-auto pb-4">
         {/* Header fields */}
@@ -159,7 +160,7 @@ export default function NewPurchaseOrderPage() {
               value={branchId}
               onChange={(e) => setBranchId(e.target.value)}
               disabled={!admin && branches.length <= 1}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm disabled:opacity-60"
+              className="h-[38px] w-full rounded-lg border border-border-strong bg-surface px-3 text-sm text-ink-2 disabled:opacity-60"
             >
               <option value="">Select branch…</option>
               {branches.map((b) => (
@@ -175,7 +176,7 @@ export default function NewPurchaseOrderPage() {
               id="po-supplier"
               value={supplierId}
               onChange={(e) => setSupplierId(e.target.value)}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              className="h-[38px] w-full rounded-lg border border-border-strong bg-surface px-3 text-sm text-ink-2"
             >
               <option value="">Select supplier…</option>
               {suppliers.map((s) => (
@@ -248,21 +249,21 @@ export default function NewPurchaseOrderPage() {
         </div>
 
         {/* Lines */}
-        <div className="overflow-x-auto rounded-lg border">
+        <div className="overflow-x-auto rounded-card border border-border">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="px-3 py-2 font-medium">Product</th>
-                <th className="px-3 py-2 text-right font-medium">Quantity</th>
-                <th className="px-3 py-2 text-right font-medium">Unit cost</th>
-                <th className="px-3 py-2 text-right font-medium">Line total</th>
-                <th className="px-3 py-2" />
+              <tr className="border-b border-divider bg-surface-subtle text-left text-2xs font-bold uppercase tracking-wide text-text-muted">
+                <th className="px-3 py-2.5">Product</th>
+                <th className="w-40 px-3 py-2.5 text-right">Quantity</th>
+                <th className="w-40 px-3 py-2.5 text-right">Unit cost</th>
+                <th className="w-32 px-3 py-2.5 text-right">Line total</th>
+                <th className="w-12 px-3 py-2.5" />
               </tr>
             </thead>
             <tbody>
               {lines.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                  <td colSpan={5} className="px-3 py-8 text-center text-sm text-text-muted">
                     No lines yet — search above to add products.
                   </td>
                 </tr>
@@ -270,40 +271,40 @@ export default function NewPurchaseOrderPage() {
                 lines.map((l) => {
                   const lineTotal = (Number(l.qty) || 0) * (Number(l.unit_cost) || 0);
                   return (
-                    <tr key={l.product_id} className="border-b last:border-0">
+                    <tr key={l.product_id} className="border-b border-divider last:border-0">
                       <td className="px-3 py-2">
-                        <span className="font-medium">{l.name}</span>
-                        {l.sku && <span className="ml-1.5 text-xs text-muted-foreground">{l.sku}</span>}
+                        <span className="font-medium text-ink-2">{l.name}</span>
+                        {l.sku && <span className="ml-1.5 font-mono text-xs text-text-muted">{l.sku}</span>}
                         {l.tax_rate > 0 && (
-                          <span className="ml-1.5 text-xs text-muted-foreground">VAT {l.tax_rate}%</span>
+                          <span className="ml-1.5 text-xs text-text-muted">VAT {l.tax_rate}%</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-right">
+                      <td className="px-3 py-2">
                         <Input
                           type="number"
                           step="any"
                           min="0"
                           value={l.qty}
                           onChange={(e) => setLine(l.product_id, { qty: e.target.value })}
-                          className="h-9 w-24 text-right"
+                          className="ml-auto h-9 w-28 text-right font-mono tabular-nums"
                         />
                       </td>
-                      <td className="px-3 py-2 text-right">
+                      <td className="px-3 py-2">
                         <Input
                           type="number"
                           step="any"
                           min="0"
                           value={l.unit_cost}
                           onChange={(e) => setLine(l.product_id, { unit_cost: e.target.value })}
-                          className="h-9 w-28 text-right"
+                          className="ml-auto h-9 w-28 text-right font-mono tabular-nums"
                         />
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums">{naira(lineTotal)}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums text-ink">{naira(lineTotal)}</td>
                       <td className="px-3 py-2 text-right">
                         <Button
                           size="icon"
                           variant="ghost"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
+                          className="ml-auto h-8 w-8 text-danger hover:text-danger"
                           onClick={() => removeLine(l.product_id)}
                           aria-label="Remove line"
                         >

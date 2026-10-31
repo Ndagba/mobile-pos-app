@@ -5,8 +5,9 @@ import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /**
- * Minimal modal built from primitives (no shadcn dialog / new deps): a dimmed
- * backdrop + centered panel, closable via the backdrop, the ✕, or Escape.
+ * Centered modal (handoff §6): dimmed scrim + panel that fades and scales from
+ * .98, closable via the scrim, the ✕, or Escape. Built from primitives (no extra
+ * deps). API is unchanged from the original so existing call sites keep working.
  */
 export function Modal({
   open,
@@ -34,22 +35,26 @@ export function Modal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden />
+      <div
+        className="jp-scrim-in absolute inset-0 bg-[rgba(14,14,16,0.32)]"
+        onClick={onClose}
+        aria-hidden
+      />
       <div
         role="dialog"
         aria-modal="true"
         className={cn(
-          'relative z-10 max-h-[90vh] w-full max-w-md overflow-hidden rounded-lg border bg-card shadow-lg',
+          'jp-modal-in relative z-10 max-h-[90vh] w-full max-w-md overflow-hidden rounded-modal border bg-card shadow-modal',
           className
         )}
       >
         {title !== undefined && (
-          <div className="flex items-center justify-between border-b px-4 py-3">
-            <h2 className="text-base font-semibold">{title}</h2>
+          <div className="flex items-center justify-between border-b border-divider px-5 py-3.5">
+            <h2 className="text-md font-bold tracking-[-0.01em] text-ink">{title}</h2>
             <button
               type="button"
               onClick={onClose}
-              className="rounded p-1 text-muted-foreground hover:text-foreground"
+              className="rounded-md p-1 text-text-muted transition-colors hover:bg-surface-subtle hover:text-ink"
               aria-label="Close"
             >
               <X className="h-4 w-4" />

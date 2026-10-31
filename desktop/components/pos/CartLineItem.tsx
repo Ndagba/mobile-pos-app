@@ -2,7 +2,6 @@
 
 import { Minus, Plus, Trash2 } from 'lucide-react';
 import { canIncrementQuantity, naira } from '@jaypos/shared';
-import { Button } from '@/components/ui/button';
 import type { CartLine } from '@/store/cartStore';
 
 /** One cart line: name, unit price, quantity stepper, line total, remove. */
@@ -19,43 +18,40 @@ export function CartLineItem({
   const canInc = canIncrementQuantity(line, line.quantity);
 
   return (
-    <div className="flex items-center gap-2 py-2">
+    <div className="flex items-center gap-2 py-2.5">
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{line.product_name}</p>
-        <p className="text-xs text-muted-foreground">{naira(line.unit_price)} each</p>
+        <p className="truncate text-sm font-medium text-ink-2">{line.product_name}</p>
+        <p className="font-mono text-2xs text-text-muted">{naira(line.unit_price)} each</p>
       </div>
       <div className="flex items-center gap-1">
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-7 w-7"
+        <button
+          type="button"
           onClick={() => onQuantity(line.product_id, line.quantity - 1)}
           aria-label="Decrease quantity"
+          className="flex h-7 w-7 items-center justify-center rounded-md border border-border-strong text-ink-2 hover:bg-surface-subtle"
         >
           <Minus className="h-3.5 w-3.5" />
-        </Button>
-        <span className="w-8 text-center text-sm tabular-nums">{line.quantity}</span>
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-7 w-7"
+        </button>
+        <span className="w-8 text-center font-mono text-sm tabular-nums text-ink">{line.quantity}</span>
+        <button
+          type="button"
           disabled={!canInc}
           onClick={() => onQuantity(line.product_id, line.quantity + 1)}
           aria-label="Increase quantity"
+          className="flex h-7 w-7 items-center justify-center rounded-md border border-border-strong text-ink-2 hover:bg-surface-subtle disabled:opacity-40"
         >
           <Plus className="h-3.5 w-3.5" />
-        </Button>
+        </button>
       </div>
-      <span className="w-20 text-right text-sm font-medium tabular-nums">{naira(lineTotal)}</span>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 text-muted-foreground hover:text-destructive"
+      <span className="w-20 text-right font-mono text-sm font-semibold tabular-nums text-ink">{naira(lineTotal)}</span>
+      <button
+        type="button"
         onClick={() => onRemove(line.product_id)}
         aria-label="Remove item"
+        className="rounded-md p-1 text-text-muted hover:text-danger"
       >
         <Trash2 className="h-3.5 w-3.5" />
-      </Button>
+      </button>
     </div>
   );
 }

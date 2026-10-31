@@ -49,3 +49,18 @@ export function canManagePurchasing(user: RoleBearer): boolean {
 export function canViewReports(user: RoleBearer): boolean {
   return user?.role === 'admin' || user?.role === 'manager' || !!user?.is_super_admin;
 }
+
+/**
+ * Admin (or super-admin) only: may view and manage users & roles. The backend's
+ * `/auth/users*` routes gate creation, role changes, deactivation and PIN resets
+ * to admins; this only decides whether the section is shown. Managers and cashiers
+ * never see it.
+ */
+export function canManageUsers(user: RoleBearer): boolean {
+  return isAdmin(user);
+}
+
+/** Admin or manager: Settings access (keep current check — not admin-only). */
+export function canManageSettings(user: RoleBearer): boolean {
+  return user?.role === 'admin' || user?.role === 'manager' || !!user?.is_super_admin;
+}

@@ -19,10 +19,10 @@ export function CategoryTabs({
       type="button"
       onClick={() => onSelect(id)}
       className={cn(
-        'whitespace-nowrap rounded-full border px-3 py-1.5 text-sm transition-colors',
+        'whitespace-nowrap rounded-pill px-3 py-1.5 text-sm font-semibold transition-colors',
         selected === id
-          ? 'border-primary bg-primary/10 text-primary'
-          : 'border-input text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+          ? 'bg-ink text-white'
+          : 'bg-muted text-text-muted hover:bg-secondary hover:text-ink-2'
       )}
     >
       {label}

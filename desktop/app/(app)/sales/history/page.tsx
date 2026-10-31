@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowLeft, WifiOff, RefreshCcw, Printer } from 'lucide-react';
 import { naira } from '@jaypos/shared';
 import { Button } from '@/components/ui/button';
+import { PageHeader } from '@/components/ui/page-header';
 import { Spinner } from '@/components/ui/spinner';
 import { useNetworkStatus } from '@/lib/useNetwork';
 import { numOr0 } from '@/lib/normalize';
@@ -150,24 +151,20 @@ export default function HistoryPage() {
 
   return (
     <div className="flex h-full flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Transaction history</h1>
-          {online && data && (
-            <p className="text-sm text-muted-foreground">
-              {total} transaction(s) · net {naira(data.netSum)}
-            </p>
-          )}
-        </div>
-        <Link href="/sales">
-          <Button variant="outline" size="sm">
-            <ArrowLeft className="h-4 w-4" />
-            Back to sales
-          </Button>
-        </Link>
-      </div>
+      <PageHeader
+        title="Sales history"
+        subtitle={online && data ? `${total} transaction(s) · net ${naira(data.netSum)}` : undefined}
+        actions={
+          <Link href="/sales">
+            <Button variant="outline" size="sm">
+              <ArrowLeft className="h-4 w-4" />
+              Back to sales
+            </Button>
+          </Link>
+        }
+      />
       {pendingCount > 0 && (
-        <div className="rounded-md bg-blue-100 px-3 py-2 text-sm text-blue-800">
+        <div className="rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning">
           {pendingCount} sale(s) pending sync. They’ll appear here once synced to the server.
         </div>
       )}

@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
 import { naira } from '@jaypos/shared';
 import { cn } from '@/lib/utils';
+import { ReportActions } from '@/components/reports/ReportActions';
+import type { ReportDoc } from '@/lib/reportExport';
 import { ReportContext } from '../ReportContext';
 
 type Period = 'daily' | 'weekly' | 'monthly';
@@ -51,8 +53,52 @@ export default function ProductReportPage() {
   const totalUnits = products.reduce((s, p) => s + p.total_sold, 0);
   const totalProfit = products.reduce((s, p) => s + p.profit, 0);
 
+  const buildDoc = React.useCallback((): ReportDoc | null => {
+    if (products.length === 0) return null;
+    const periodLabel = PERIODS.find((p) => p.key === period)?.label ?? period;
+    return {
+      title: 'Product Performance Report',
+      meta: [
+        { label: 'Period', value: periodLabel },
+        { label: 'Sorted by', value: SORTS.find((s) => s.key === sort)?.label ?? sort },
+        { label: 'Generated', value: new Date().toLocaleString() },
+      ],
+      summary: [
+        { label: 'Total Revenue', value: naira(totalRevenue) },
+        { label: 'Units Sold', value: String(totalUnits) },
+        { label: 'Total Profit', value: naira(totalProfit) },
+      ],
+      tables: [
+        {
+          heading: 'Products',
+          columns: [
+            { label: 'Product' },
+            { label: 'SKU' },
+            { label: 'Units Sold', type: 'number', align: 'right' },
+            { label: 'Revenue', type: 'currency', align: 'right' },
+            { label: 'Transactions', type: 'number', align: 'right' },
+            { label: 'Profit', type: 'currency', align: 'right' },
+          ],
+          rows: products.map((p) => [
+            p.name,
+            p.sku ?? '',
+            p.total_sold,
+            p.total_revenue,
+            p.transaction_count,
+            p.profit,
+          ]),
+          totals: ['Totals', '', totalUnits, totalRevenue, '', totalProfit],
+        },
+      ],
+    };
+  }, [products, period, sort, totalRevenue, totalUnits, totalProfit]);
+
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Product Performance</h2>
+        <ReportActions getDoc={buildDoc} filenameBase="product_report" disabled={isLoading} />
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-1.5">
           {PERIODS.map((p) => (

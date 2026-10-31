@@ -11,7 +11,7 @@ export function DiscountField() {
 
   return (
     <div className="flex items-center justify-between gap-3">
-      <Label htmlFor="discount" className="text-sm text-muted-foreground">
+      <Label htmlFor="discount" className="text-sm font-medium text-text-muted">
         Discount (₦)
       </Label>
       <Input
@@ -21,7 +21,7 @@ export function DiscountField() {
         inputMode="decimal"
         value={discount || ''}
         onChange={(e) => setDiscount(parseFloat(e.target.value) || 0)}
-        className="h-8 w-28 text-right"
+        className="h-9 w-28 text-right font-mono tabular-nums"
         placeholder="0"
       />
     </div>

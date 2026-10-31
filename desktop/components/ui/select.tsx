@@ -20,7 +20,7 @@ export function Select({
   return (
     <select
       className={cn(
-        "flex h-9 w-full rounded-md border border-input bg-background px-3 py-9 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+        "flex h-[38px] w-full rounded-lg border border-border-strong bg-surface px-3 text-sm text-ink-2 transition-colors focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
         className
       )}
       defaultValue={defaultValue}

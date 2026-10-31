@@ -15,9 +15,12 @@ import { useLocationMutations } from '@/hooks/useLocationMutations';
 import { useAuthStore } from '@/store/authStore';
 import { isAdmin } from '@/lib/roles';
 import { apiErrorMessage } from '@/lib/errors';
+import { useExpiringBatches } from '@/hooks/useExpiringBatches';
 import { Input } from '@/components/ui/input';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { PageHeader } from '@/components/ui/page-header';
+import { Select } from '@/components/ui/select';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { InventoryTabs, type InventoryTab } from '@/components/inventory/InventoryTabs';
 import { BranchFilter } from '@/components/inventory/BranchFilter';
@@ -71,6 +74,8 @@ export default function InventoryPage() {
   const categoriesQ = useCategories({ branchId });
   const locationsQ = useLocations({ branchId });
   const lowStockQ = useLowStock({ branchId });
+  const expiringQ = useExpiringBatches({ days: 30, status: 'expiring' });
+  const expiringCount = expiringQ.data?.length ?? 0;
   const quickRestock = useAdjustStock();
   const productMut = useProductMutations();
   const categoryMut = useCategoryMutations();
@@ -165,37 +170,45 @@ export default function InventoryPage() {
 
   return (
     <div className="flex h-full flex-col gap-4">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Inventory</h1>
-          <p className="text-sm text-muted-foreground">Manage products, stock and categories.</p>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Link href="/inventory/turnover" className={cn(buttonVariants({ variant: 'outline' }))}>
-            Turnover
-          </Link>
-          <Link href="/inventory/expiring" className={cn(buttonVariants({ variant: 'outline' }))}>
-            Expiring
-          </Link>
-          {admin && (
-            <Link href="/inventory/import" className={cn(buttonVariants({ variant: 'outline' }))}>
-              Import
+      <PageHeader
+        title="Inventory"
+        subtitle="Products carry stock. Services are sold without inventory."
+        actions={
+          <>
+            <Link href="/inventory/turnover" className={cn(buttonVariants({ variant: 'outline' }))}>
+              Turnover
             </Link>
-          )}
-          {admin && (
-            <Link href="/inventory/counts" className={cn(buttonVariants({ variant: 'outline' }))}>
-              Stock counts
+            <Link
+              href="/inventory/expiring"
+              className={cn(buttonVariants({ variant: 'outline' }), 'relative')}
+            >
+              Expiring
+              {expiringCount > 0 && (
+                <span className="ml-1 rounded-pill bg-warning-soft px-1.5 font-mono text-2xs font-semibold text-warning">
+                  {expiringCount}
+                </span>
+              )}
             </Link>
-          )}
-          {tab === 'categories' ? (
-            <Button onClick={openCreateCategory}>New category</Button>
-          ) : tab === 'locations' ? (
-            <Button onClick={openCreateLocation}>New location</Button>
-          ) : (
-            <Button onClick={openCreateProduct}>New product</Button>
-          )}
-        </div>
-      </header>
+            {admin && (
+              <Link href="/inventory/import" className={cn(buttonVariants({ variant: 'outline' }))}>
+                Import
+              </Link>
+            )}
+            {admin && (
+              <Link href="/inventory/counts" className={cn(buttonVariants({ variant: 'outline' }))}>
+                Stock counts
+              </Link>
+            )}
+            {tab === 'categories' ? (
+              <Button onClick={openCreateCategory}>New category</Button>
+            ) : tab === 'locations' ? (
+              <Button onClick={openCreateLocation}>New location</Button>
+            ) : (
+              <Button onClick={openCreateProduct}>New product</Button>
+            )}
+          </>
+        }
+      />
 
       {multiBranch && (
         <BranchFilter branches={branches} selected={branchId} onSelect={setBranchId} />
@@ -211,10 +224,10 @@ export default function InventoryPage() {
             placeholder="Search name, SKU or barcode"
             className="max-w-xs"
           />
-          <select
+          <Select
             value={categoryId ?? ''}
             onChange={(e) => setCategoryId(e.target.value || undefined)}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            className="max-w-[200px]"
           >
             <option value="">All categories</option>
             {categories.map((c) => (
@@ -222,7 +235,7 @@ export default function InventoryPage() {
                 {c.name}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
       )}
 

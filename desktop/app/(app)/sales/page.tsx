@@ -10,7 +10,6 @@ import { ProductSearch } from '@/components/pos/ProductSearch';
 import { CategoryTabs } from '@/components/pos/CategoryTabs';
 import { ProductGrid } from '@/components/pos/ProductGrid';
 import { CartPanel } from '@/components/pos/CartPanel';
-import { Checkout } from '@/components/pos/Checkout';
 import { useSyncStore } from '@/store/syncStore';
 
 /**
@@ -61,18 +60,16 @@ export default function SalesPage() {
   };
 
   return (
-    <div className="flex h-full gap-6">
-      <section className="flex min-w-0 flex-1 flex-col gap-4">
+    <div className="-mx-7 -my-6 flex h-[calc(100vh-60px)]">
+      <section className="flex min-w-0 flex-1 flex-col gap-3 overflow-hidden px-6 py-5">
         <ProductSearch value={search} onChange={setSearch} onEnter={handleBarcodeEnter} />
         <CategoryTabs selected={categoryId} onSelect={setCategoryId} />
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div className="min-h-0 flex-1 overflow-auto pr-1">
           <ProductGrid products={products} loading={productsQ.isLoading} onSelect={addItem} />
         </div>
       </section>
-      <aside className="flex w-[360px] shrink-0 xl:w-[400px]">
-        <CartPanel>
-          <Checkout onCompleted={handleSaleCompleted} />
-        </CartPanel>
+      <aside className="flex w-[400px] shrink-0">
+        <CartPanel onCompleted={handleSaleCompleted} />
       </aside>
     </div>
   );

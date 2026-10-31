@@ -102,7 +102,7 @@ export function DropdownMenuContent({
 
       <div
         className={cn(
-          'absolute z-50 mt-2 min-w-[160px] rounded-md border bg-popover p-1 text-popover-foreground shadow-md',
+          'absolute z-50 mt-2 min-w-[180px] rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-modal',
           align === 'end' ? 'right-0' : 'left-0',
           className
         )}
@@ -138,7 +138,7 @@ export function DropdownMenuItem({
     <button
       type="button"
       className={cn(
-        'flex w-full cursor-pointer items-center rounded-sm px-3 py-2 text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground',
+        'flex w-full cursor-pointer items-center rounded-md px-3 py-2 text-sm text-ink-2 outline-none transition-colors hover:bg-surface-subtle',
         className
       )}
       onClick={handleClick}

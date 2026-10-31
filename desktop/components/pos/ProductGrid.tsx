@@ -23,11 +23,14 @@ export function ProductGrid({
   }
 
   if (products.length === 0) {
-    return <p className="py-10 text-center text-sm text-muted-foreground">No products found.</p>;
+    return <p className="py-10 text-center text-sm text-text-muted">No products found.</p>;
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+    <div
+      className="grid gap-3"
+      style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}
+    >
       {products.map((p) => (
         <ProductCard key={p.id} product={p} onSelect={onSelect} />
       ))}

@@ -1,115 +1,217 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import type { AuthUser } from '@jaypos/shared';
+import Image from 'next/image';
+import { usePathname, useRouter } from 'next/navigation';
+import { useState } from 'react';
 import {
-  LayoutDashboard,
-  ShoppingCart,
-  History,
-  Package,
-  Truck,
-  ClipboardList,
-  BarChart3,
-  Store,
-  Users,
-  Wallet,
-  type LucideIcon
+  PanelLeftClose,
+  PanelLeft,
+  LogOut,
+  Eye,
+  EyeOff,
+  User as UserIcon,
+  ChevronUp
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
-import { canManageInventory, canManageSuppliers, canManagePurchasing, canViewReports } from '@/lib/roles';
+import { usePrefsStore } from '@/store/prefsStore';
+import { useLowStock } from '@/hooks/useLowStock';
+import { canManageInventory } from '@/lib/roles';
+import { NAV_GROUPS, activeNavHref, type NavItem } from './nav';
 
-interface NavItem {
-  label: string;
-  href: string;
-  icon: LucideIcon;
-  /** Not yet built — rendered but non-navigable in Phase 1. */
-  disabled?: boolean;
-  /** Role gate — hidden entirely when this returns false. Absent → always shown. */
-  visible?: (user: AuthUser | null) => boolean;
-  /** Additional path prefixes that activate this nav item */
-  matchPaths?: string[];
+function initials(name?: string, email?: string): string {
+  const src = (name || email || '?').trim();
+  const parts = src.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return src.slice(0, 2).toUpperCase();
 }
-
-/**
- * Primary navigation. Dashboard/Sales/History/Inventory/Suppliers are wired;
- * Reports is shown (disabled) to convey the app's shape without producing a 404,
- * lighting up when Phase 5 lands. Inventory and Suppliers are gated to
- * admin + manager — a cashier never sees them (mobile parity).
- */
-const NAV: NavItem[] = [
-  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { label: 'Sales', href: '/sales', icon: ShoppingCart },
-  { label: 'History', href: '/sales/history', icon: History },
-  { label: 'Customers', href: '/customers', icon: Users },
-  { label: 'Inventory', href: '/inventory', icon: Package, visible: canManageInventory },
-  { label: 'Suppliers', href: '/suppliers', icon: Truck, visible: canManageSuppliers },
-  { label: 'Purchasing', href: '/purchasing', icon: ClipboardList, visible: canManagePurchasing },
-  { label: 'Expenses', href: '/admin/expenses', icon: Wallet, visible: canManageInventory },
-  { label: 'Report', href: '/reports', icon: BarChart3, matchPaths: ['/admin/financials'], visible: canViewReports },
-  { label: 'Settings', href: '/settings', icon: Store, visible: (user) => user?.role === 'admin' || user?.role === 'manager' },
-];
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
+  const collapsed = usePrefsStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = usePrefsStore((s) => s.toggleSidebar);
+  const hideAmounts = usePrefsStore((s) => s.hideAmounts);
+  const toggleHideAmounts = usePrefsStore((s) => s.toggleHideAmounts);
+  const [menuOpen, setMenuOpen] = useState(false);
 
-  const nav = NAV.filter((i) => !i.visible || i.visible(user));
+  // Low-stock count badge on the Inventory nav item (admin/manager only).
+  const { data: lowStock } = useLowStock();
+  const lowCount = canManageInventory(user) ? lowStock?.length ?? 0 : 0;
 
-  // A single active item: the longest nav href that matches the current path, so
-  // /sales/history lights up "History" (not its /sales prefix).
-  const activeHref = nav
-    .filter((i) => !i.disabled)
-    .map((i) => i.href)
-    .filter((href) => {
-      const item = nav.find((i) => i.href === href);
-      return (
-        pathname === href ||
-        pathname.startsWith(`${href}/`) ||
-        item?.matchPaths?.some((p) => pathname === p || pathname.startsWith(`${p}/`))
-      );
-    })
-    .sort((a, b) => b.length - a.length)[0];
+  const active = activeNavHref(user, pathname);
+
+  const handleLogout = async () => {
+    await logout();
+    router.replace('/login');
+  };
+
+  const renderItem = (item: NavItem) => {
+    if (item.visible && !item.visible(user)) return null;
+    const isActive = item.href === active;
+    const badge = item.href === '/inventory' && lowCount > 0 ? lowCount : null;
+
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        title={collapsed ? item.label : undefined}
+        className={cn(
+          'group flex h-9 items-center gap-3 rounded-lg px-2.5 text-sm transition-colors',
+          collapsed && 'justify-center px-0',
+          isActive
+            ? 'bg-primary-soft font-bold text-primary-ink'
+            : 'font-medium text-[#3A3848] hover:bg-surface-subtle'
+        )}
+      >
+        <item.icon
+          className={cn('h-[18px] w-[18px] shrink-0', isActive ? 'text-primary' : 'text-text-muted')}
+        />
+        {!collapsed && (
+          <>
+            <span className="flex-1 truncate">{item.label}</span>
+            {badge !== null && (
+              <span className="rounded-pill bg-warning-soft px-1.5 py-0.5 font-mono text-2xs font-semibold text-warning">
+                {badge}
+              </span>
+            )}
+            {item.shortcut && badge === null && (
+              <kbd className="rounded-chip border border-border-strong bg-surface-subtle px-1.5 py-0.5 font-mono text-[11px] text-text-faint">
+                {item.shortcut}
+              </kbd>
+            )}
+          </>
+        )}
+        {collapsed && badge !== null && (
+          <span className="absolute ml-5 -mt-5 h-2 w-2 rounded-pill bg-warning" />
+        )}
+      </Link>
+    );
+  };
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r bg-card">
-      <div className="flex h-16 items-center gap-2 border-b px-5">
-        <Store className="h-6 w-6 text-primary" />
-        <span className="text-lg font-semibold">JayPOS</span>
+    <aside
+      className={cn(
+        'flex shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-180 ease-out',
+        collapsed ? 'w-[72px]' : 'w-[248px]'
+      )}
+    >
+      {/* Logo row */}
+      <div className={cn('flex h-[60px] items-center gap-2.5 px-4', collapsed && 'justify-center px-0')}>
+        <Image src="/icon.svg" alt="JayPOS" width={32} height={32} className="rounded-[9px]" priority />
+        {!collapsed && (
+          <span className="text-[19px] font-extrabold leading-none tracking-[-0.04em]">
+            <span className="text-ink">Jay</span>
+            <span className="text-primary">POS</span>
+          </span>
+        )}
       </div>
-      <nav className="flex-1 space-y-1 p-3">
-        {nav.map((item) => {
-          const active = item.href === activeHref;
-          const className = cn(
-            'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-            item.disabled
-              ? 'cursor-not-allowed text-muted-foreground/50'
-              : active
-                ? 'bg-primary/10 text-primary'
-                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-          );
-          const content = (
-            <>
-              <item.icon className="h-4 w-4" />
-              {item.label}
-              {item.disabled && (
-                <span className="ml-auto text-[10px] uppercase tracking-wide">soon</span>
-              )}
-            </>
-          );
 
-          return item.disabled ? (
-            <div key={item.href} className={className} aria-disabled="true">
-              {content}
+      {/* Nav groups */}
+      <nav className="flex-1 overflow-y-auto px-3 pb-2">
+        {NAV_GROUPS.map((group) => {
+          const items = group.items.filter((i) => !i.visible || i.visible(user));
+          if (items.length === 0) return null;
+          return (
+            <div key={group.label} className="mb-1 mt-3 first:mt-1">
+              {!collapsed && (
+                <p className="px-2.5 pb-1.5 text-[10.5px] font-bold uppercase tracking-[0.08em] text-text-faint">
+                  {group.label}
+                </p>
+              )}
+              <div className="space-y-0.5">{items.map(renderItem)}</div>
             </div>
-          ) : (
-            <Link key={item.href} href={item.href} className={className}>
-              {content}
-            </Link>
           );
         })}
       </nav>
+
+      {/* Footer: user card + menu, collapse toggle */}
+      <div className="relative border-t border-divider p-3">
+        {menuOpen && (
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setMenuOpen(false)} aria-hidden />
+            <div className="absolute bottom-[64px] left-3 right-3 z-40 overflow-hidden rounded-lg border border-border bg-popover shadow-modal">
+              <button
+                type="button"
+                onClick={() => setMenuOpen(false)}
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-ink-2 hover:bg-surface-subtle"
+              >
+                <UserIcon className="h-4 w-4 text-text-muted" /> Profile
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  toggleHideAmounts();
+                  setMenuOpen(false);
+                }}
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-ink-2 hover:bg-surface-subtle"
+              >
+                {hideAmounts ? (
+                  <Eye className="h-4 w-4 text-text-muted" />
+                ) : (
+                  <EyeOff className="h-4 w-4 text-text-muted" />
+                )}
+                {hideAmounts ? 'Show amounts' : 'Hide amounts'}
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="flex w-full items-center gap-2.5 border-t border-divider px-3 py-2 text-sm text-danger hover:bg-danger-soft"
+              >
+                <LogOut className="h-4 w-4" /> Log out
+              </button>
+            </div>
+          </>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setMenuOpen((v) => !v)}
+          className={cn(
+            'flex w-full items-center gap-2.5 rounded-lg p-1.5 text-left transition-colors hover:bg-surface-subtle',
+            collapsed && 'justify-center'
+          )}
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-pill bg-primary-soft font-mono text-xs font-semibold text-primary-ink">
+            {initials(user?.first_name, user?.email)}
+          </span>
+          {!collapsed && (
+            <>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold text-ink-2">
+                  {user?.first_name || user?.email || 'User'}
+                </span>
+                <span className="block truncate text-2xs capitalize text-text-muted">
+                  {user?.is_super_admin ? 'Super admin' : user?.role}
+                </span>
+              </span>
+              <ChevronUp className="h-4 w-4 shrink-0 text-text-faint" />
+            </>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className={cn(
+            'mt-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-text-muted transition-colors hover:bg-surface-subtle',
+            collapsed && 'justify-center px-0'
+          )}
+        >
+          {collapsed ? (
+            <PanelLeft className="h-[18px] w-[18px]" />
+          ) : (
+            <>
+              <PanelLeftClose className="h-[18px] w-[18px]" />
+              Collapse
+            </>
+          )}
+        </button>
+      </div>
     </aside>
   );
 }

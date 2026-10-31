@@ -2,26 +2,42 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * JayPOS design tokens (handoff §7). The core shadcn variables below are the
+ * purple light theme; `components/ui/*` inherit them via hsl(var(--token)).
+ * The extended brand/semantic palette (success/warning/danger, inks, surfaces)
+ * is declared as raw hex Tailwind colors in tailwind.config.ts.
+ *
+ * Dark mode: the `.dark` block is intentionally left on the old shadcn values
+ * for now — the redesign is light-only this round (see plan). Do not rely on it.
+ */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-    --radius: 0.5rem;
+    /* surfaces */
+    --background: 252 33% 97%;        /* #F6F5FA app bg */
+    --foreground: 240 7% 6%;          /* #0E0E10 ink */
+    --card: 0 0% 100%;                /* #FFFFFF surface */
+    --card-foreground: 240 7% 6%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 7% 6%;
+    /* brand */
+    --primary: 249 91% 65%;           /* #6E56F7 */
+    --primary-foreground: 0 0% 100%;
+    /* neutrals */
+    --secondary: 252 24% 96%;         /* #F3F2F7 muted */
+    --secondary-foreground: 251 17% 13%; /* #1D1B26 ink-2 */
+    --muted: 252 24% 96%;
+    --muted-foreground: 246 9% 50%;   /* #77758A text-muted */
+    --accent: 252 24% 96%;
+    --accent-foreground: 251 17% 13%;
+    /* danger */
+    --destructive: 353 67% 42%;       /* #B42334 */
+    --destructive-foreground: 0 0% 100%;
+    /* lines / inputs / focus */
+    --border: 247 22% 92%;            /* #E7E6EF */
+    --input: 251 21% 90%;             /* #E1DFEA border-strong */
+    --ring: 249 91% 65%;              /* #6E56F7 */
+    --radius: 0.5625rem;              /* 9px — buttons/inputs/nav */
   }
 
   .dark {
@@ -37,6 +53,8 @@
     --muted-foreground: 215 20.2% 65.1%;
     --accent: 217.2 32.6% 17.5%;
     --accent-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
     --border: 217.2 32.6% 17.5%;
@@ -51,5 +69,39 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: 'cv11', 'ss01';
   }
+  /* Money, SKUs, quantities and shortcut chips use the mono face with
+     tabular, lining figures so columns align (handoff §6). */
+  .tabular,
+  .font-mono {
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+  /* Design focus ring (§6): 3px soft lavender halo + brand border. Applied to
+     the native focus-visible state so every input/button/link picks it up. */
+  :where(input, select, textarea, button, a, [tabindex]):focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px hsl(var(--ring) / 0.28);
+    border-color: hsl(var(--primary));
+  }
+}
+
+/* Overlay motion (§6): modals fade + scale from .98; drawers slide from the
+   right; scrims fade in. */
+@keyframes jp-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes jp-modal-in {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes jp-drawer-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@layer utilities {
+  .jp-scrim-in { animation: jp-scrim-in 0.16s ease-out; }
+  .jp-modal-in { animation: jp-modal-in 0.18s ease-out; }
+  .jp-drawer-in { animation: jp-drawer-in 0.2s ease; }
 }

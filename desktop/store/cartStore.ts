@@ -36,6 +36,8 @@ interface CartStore {
   setDiscount: (amount: number) => void;
   setCustomer: (customer: NormalizedCustomer | null) => void;
   setPaymentMethod: (method: PaymentMethod | null) => void;
+  /** Replace the whole cart from a resumed/parked sale (handoff §5 hold/resume). */
+  loadFrom: (state: { items: CartLine[]; discount_amount: number; customer: NormalizedCustomer | null }) => void;
   clear: () => void;
 }
 
@@ -103,6 +105,9 @@ export const useCartStore = create<CartStore>((set, get) => ({
   setCustomer: (customer) => set({ customer }),
 
   setPaymentMethod: (method) => set({ payment_method: method }),
+
+  loadFrom: ({ items, discount_amount, customer }) =>
+    set({ items, discount_amount, customer, payment_method: null }),
 
   clear: () =>
     set({ items: [], discount_amount: 0, customer: null, payment_method: null }),

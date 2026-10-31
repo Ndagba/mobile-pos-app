@@ -32,9 +32,9 @@ export function ConfirmDialog({
 }) {
   return (
     <Modal open={open} onClose={onClose} title={title} className="max-w-sm">
-      <div className="space-y-4 px-4 py-4">
-        <div className="text-sm text-muted-foreground">{message}</div>
-        {error && <p className="text-sm text-destructive">{error}</p>}
+      <div className="space-y-4 px-5 py-4">
+        <div className="text-sm text-text">{message}</div>
+        {error && <p className="text-sm text-danger">{error}</p>}
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={pending}>
             Cancel

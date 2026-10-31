@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { Search, Plus, Edit, Trash2, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { PageHeader } from '@/components/ui/page-header';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -97,17 +98,17 @@ export default function CustomersPage() {
   };
 
   return (
-    <div className="flex h-full flex-col gap-6 p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Customers</h1>
-          <p className="text-sm text-muted-foreground">Manage your customer directory and credit limits.</p>
-        </div>
-        <Button onClick={openCreate} className="gap-2">
-          <UserPlus className="h-4 w-4" />
-          New Customer
-        </Button>
-      </div>
+    <div className="flex h-full flex-col gap-5">
+      <PageHeader
+        title="Customers"
+        subtitle="Purchase history, credit balances and one-click selling."
+        actions={
+          <Button onClick={openCreate}>
+            <UserPlus className="h-4 w-4" />
+            Add customer
+          </Button>
+        }
+      />
 
       <CustomerStats {...stats} />
 

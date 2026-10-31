@@ -1,6 +1,6 @@
 'use client';
 
-import { cn } from '@/lib/utils';
+import { Segmented } from '@/components/ui/segmented';
 
 export type InventoryTab = 'all' | 'products' | 'services' | 'categories' | 'locations' | 'low-stock';
 
@@ -24,33 +24,11 @@ export function InventoryTabs({
   counts: Record<InventoryTab, number>;
 }) {
   return (
-    <div className="flex flex-wrap gap-1 border-b">
-      {INVENTORY_TABS.map(({ key, label }) => {
-        const isActive = key === active;
-        return (
-          <button
-            key={key}
-            type="button"
-            onClick={() => onChange(key)}
-            className={cn(
-              '-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium transition-colors',
-              isActive
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            )}
-          >
-            {label}
-            <span
-              className={cn(
-                'rounded-full px-1.5 py-0.5 text-xs tabular-nums',
-                isActive ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
-              )}
-            >
-              {counts[key]}
-            </span>
-          </button>
-        );
-      })}
-    </div>
+    <Segmented
+      className="flex-wrap"
+      value={active}
+      onChange={onChange}
+      options={INVENTORY_TABS.map((t) => ({ value: t.key, label: t.label, count: counts[t.key] }))}
+    />
   );
 }

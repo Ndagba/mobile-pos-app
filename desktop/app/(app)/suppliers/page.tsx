@@ -8,6 +8,7 @@ import { useSupplierMutations } from '@/hooks/useSupplierMutations';
 import { apiErrorMessage } from '@/lib/errors';
 import { Input } from '@/components/ui/input';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { PageHeader } from '@/components/ui/page-header';
 import { cn } from '@/lib/utils';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { SupplierTable } from '@/components/suppliers/SupplierTable';
@@ -108,24 +109,20 @@ export default function SuppliersPage() {
 
   return (
     <div className="flex h-full flex-col gap-4">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Suppliers</h1>
-          <p className="text-sm text-muted-foreground">
-            Manage suppliers and track accounts payable.
-          </p>
-        </div>
-        <Button onClick={openCreate}>New supplier</Button>
-      </header>
+      <PageHeader
+        title="Suppliers"
+        subtitle="Who you buy from, what you owe and their order history."
+        actions={<Button onClick={openCreate}>Add supplier</Button>}
+      />
 
       <div className="grid grid-cols-2 gap-3 sm:max-w-md">
-        <div className="rounded-lg border p-3">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">Suppliers</p>
-          <p className="text-lg font-semibold tabular-nums">{counts.all}</p>
+        <div className="rounded-card border border-border p-4">
+          <p className="text-2xs font-semibold uppercase tracking-wide text-text-muted">Suppliers</p>
+          <p className="mt-1 font-mono text-lg font-bold tabular-nums text-ink">{counts.all}</p>
         </div>
-        <div className="rounded-lg border p-3">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">Total outstanding</p>
-          <p className="text-lg font-semibold tabular-nums">{naira(totalOutstanding)}</p>
+        <div className="rounded-card border border-border p-4">
+          <p className="text-2xs font-semibold uppercase tracking-wide text-text-muted">Total outstanding</p>
+          <p className="mt-1 font-mono text-lg font-bold tabular-nums text-ink">{naira(totalOutstanding)}</p>
         </div>
       </div>
 

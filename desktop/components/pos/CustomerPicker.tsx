@@ -39,36 +39,42 @@ export function CustomerPicker({
 
   return (
     <div>
-      <p className="mb-1.5 text-sm text-muted-foreground">Customer</p>
-
       {customer ? (
-        <div className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-border-strong px-3 py-2">
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{customerDisplayName(customer)}</p>
+            <p className="truncate text-sm font-semibold text-ink-2">{customerDisplayName(customer)}</p>
             {customer.phone && (
-              <p className="truncate text-xs text-muted-foreground">{customer.phone}</p>
+              <p className="truncate text-2xs text-text-muted">{customer.phone}</p>
             )}
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
               Change
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
+            <button
+              type="button"
               aria-label="Remove customer"
               onClick={() => onSelect(null)}
+              className="rounded-md p-1 text-text-muted hover:text-danger"
             >
               <X className="h-4 w-4" />
-            </Button>
+            </button>
           </div>
         </div>
       ) : (
-        <Button variant="outline" className="w-full justify-start" onClick={() => setOpen(true)}>
-          <UserPlus className="h-4 w-4" />
-          Add customer (optional)
-        </Button>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex w-full items-center gap-2.5 rounded-lg border border-border-strong px-3 py-2 text-left transition-colors hover:bg-surface-subtle"
+        >
+          <span className="flex h-8 w-8 items-center justify-center rounded-pill bg-muted text-text-muted">
+            <UserPlus className="h-4 w-4" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-ink-2">Walk-in customer</span>
+            <span className="block text-2xs text-text-muted">Attach a customer for receipts &amp; credit</span>
+          </span>
+        </button>
       )}
 
       <Modal open={open} onClose={() => setOpen(false)} title="Select customer">

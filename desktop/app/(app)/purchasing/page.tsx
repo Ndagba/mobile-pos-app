@@ -9,6 +9,7 @@ import { useSuppliers } from '@/hooks/useSuppliers';
 import { usePurchaseOrders, PO_STATUS_LABEL, type POStatus } from '@/hooks/usePurchaseOrders';
 import { Input } from '@/components/ui/input';
 import { buttonVariants } from '@/components/ui/button';
+import { PageHeader } from '@/components/ui/page-header';
 import { cn } from '@/lib/utils';
 import { BranchFilter } from '@/components/inventory/BranchFilter';
 import { PurchaseOrderTable } from '@/components/purchasing/PurchaseOrderTable';
@@ -82,17 +83,15 @@ export default function PurchasingPage() {
 
   return (
     <div className="flex h-full flex-col gap-4">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Purchasing</h1>
-          <p className="text-sm text-muted-foreground">
-            Raise purchase orders and receive stock from suppliers.
-          </p>
-        </div>
-        <Link href="/purchasing/new" className={cn(buttonVariants())}>
-          New PO
-        </Link>
-      </header>
+      <PageHeader
+        title="Purchasing"
+        subtitle="Purchase orders, deliveries and suppliers in one place."
+        actions={
+          <Link href="/purchasing/new" className={cn(buttonVariants())}>
+            New purchase order
+          </Link>
+        }
+      />
 
       {canChooseBranch && (
         <BranchFilter branches={branches} selected={branchId} onSelect={setBranchId} />
@@ -108,7 +107,7 @@ export default function PurchasingPage() {
         <select
           value={supplierId}
           onChange={(e) => setSupplierId(e.target.value)}
-          className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+          className="h-[38px] rounded-lg border border-border-strong bg-surface px-3 text-sm text-ink-2"
         >
           <option value="">All suppliers</option>
           {suppliers.map((s) => (

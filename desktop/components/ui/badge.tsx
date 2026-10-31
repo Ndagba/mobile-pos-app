@@ -2,19 +2,21 @@ import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
+/**
+ * Status/label pill (handoff §6 color pairs). Existing variant names are kept so
+ * call sites don't change; success/warning are added for stock & status pills.
+ */
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex items-center rounded-pill px-2 py-0.5 text-2xs font-semibold leading-none",
   {
     variants: {
       variant: {
-        default:
-          "variant-default inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90",
-        secondary:
-          "variant-secondary inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        destructive:
-          "variant-destructive inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold bg-destructive text-destructive-foreground hover:bg-destructive/90",
-        outline:
-          "variant-outline inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold text-foreground ring-1 ring-inset ring-muted-foreground/20",
+        default: "bg-primary-soft text-primary-ink",
+        secondary: "bg-muted text-text-muted",
+        destructive: "bg-danger-soft text-danger",
+        outline: "border border-border-strong text-ink-2",
+        success: "bg-success-soft text-success",
+        warning: "bg-warning-soft text-warning",
       },
     },
     defaultVariants: {
@@ -29,8 +31,7 @@ export interface BadgeProps
 
 function Badge({ className, variant, ...props }: BadgeProps) {
   return (
-    <div className={cn(badgeVariants({ variant }), className)} {...props}
-    />
+    <div className={cn(badgeVariants({ variant }), className)} {...props} />
   )
 }
 

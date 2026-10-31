@@ -1,13 +1,15 @@
 'use client';
 
 import type { Product } from '@jaypos/shared';
-import { getAvailableStock, isOutOfStock, naira } from '@jaypos/shared';
+import { getAvailableStock, isOutOfStock, stockStatus, naira } from '@jaypos/shared';
+import { MapPin } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { API_BASE_URL } from '@/lib/apiClient';
 
 /**
- * A single tappable product tile. Out-of-stock physical products are disabled
- * (mirrors mobile); services show no stock line and are always sellable.
+ * Product tile for the POS grid (handoff §4.3): 1:1 image (or an initial tile),
+ * 2-line name, mono price, a shelf-location line and a stock pill. Out-of-stock
+ * physical products are disabled (mirrors mobile); services are always sellable.
  */
 export function ProductCard({
   product,
@@ -20,8 +22,11 @@ export function ProductCard({
   const price = product.effective_price ?? product.unit_price ?? 0;
   const isService = product.item_type === 'SERVICE';
 
-  // Resolve image URL: Remove '/v1' from API_BASE_URL to get the root server URL,
-  // since static uploads are served from '/uploads' not '/v1/uploads'.
+  const threshold = Number(product.inventory?.low_stock_threshold ?? 10) || 10;
+  const status = isService ? 'IN_STOCK' : stockStatus(product, threshold);
+  const available = getAvailableStock(product);
+
+  // Static uploads live at the server root, not under /v1.
   const rootUrl = API_BASE_URL.replace(/\/v1\/?$/, '');
   const fullImageUrl = product.image_url ? `${rootUrl}${product.image_url}` : null;
 
@@ -31,33 +36,50 @@ export function ProductCard({
       disabled={out}
       onClick={() => onSelect(product)}
       className={cn(
-        'flex min-h-[92px] items-start gap-2 rounded-lg border bg-card p-3 text-left transition-colors',
-        out ? 'cursor-not-allowed opacity-50' : 'hover:border-primary hover:bg-accent'
+        'group flex flex-col overflow-hidden rounded-card border border-border bg-card text-left transition-all',
+        out
+          ? 'cursor-not-allowed opacity-55'
+          : 'hover:border-primary-border hover:shadow-card-hover'
       )}
     >
-      <div className="flex flex-col justify-between gap-1">
-        <span className="line-clamp-2 text-sm font-medium">{product.name}</span>
-        <div className="mt-auto">
-          <span className="block text-base font-semibold text-primary">{naira(price)}</span>
-          <span className="text-xs text-muted-foreground">
-            {isService ? 'Service' : out ? 'Out of stock' : `${getAvailableStock(product)} in stock`}
+      <div className="relative aspect-square w-full bg-muted">
+        {fullImageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={fullImageUrl} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <span className="flex h-full w-full items-center justify-center font-mono text-3xl font-semibold text-text-faint">
+            {product.name?.charAt(0).toUpperCase() ?? '?'}
           </span>
-          {product.location?.name && (
-            <span className="block text-xs text-muted-foreground">
-              Location: {product.location.name}
-            </span>
-          )}
+        )}
+        {status !== 'IN_STOCK' && (
+          <span
+            className={cn(
+              'absolute right-2 top-2 rounded-pill px-1.5 py-0.5 text-2xs font-semibold',
+              status === 'OUT_OF_STOCK' ? 'bg-danger-soft text-danger' : 'bg-warning-soft text-warning'
+            )}
+          >
+            {status === 'OUT_OF_STOCK' ? 'Out' : `${available} left`}
+          </span>
+        )}
+      </div>
+
+      <div className="flex flex-1 flex-col gap-1 p-2.5">
+        <span className="line-clamp-2 text-sm font-semibold leading-tight text-ink-2">
+          {product.name}
+        </span>
+        {product.location?.name && !isService && (
+          <span className="flex items-center gap-1 text-[11.5px] text-text-muted">
+            <MapPin className="h-3 w-3 shrink-0" />
+            <span className="truncate">{product.location.name}</span>
+          </span>
+        )}
+        <div className="mt-auto flex items-center justify-between pt-1">
+          <span className="font-mono text-md font-semibold text-ink">{naira(price)}</span>
+          <span className="text-2xs text-text-faint">
+            {isService ? 'Service' : out ? '' : `${available} in stock`}
+          </span>
         </div>
       </div>
-      {fullImageUrl && (
-        <img
-          src={fullImageUrl}
-          alt=""
-          className="h-12 w-12 shrink-0 rounded-md object-cover bg-muted"
-        />
-      )}
     </button>
   );
-
-
 }

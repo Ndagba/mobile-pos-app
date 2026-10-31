@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { PlusCircle, Tags, BarChart3 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { PageHeader } from '@/components/ui/page-header';
 
 export default function ExpenseHubPage() {
   const expenseModules = [
@@ -31,7 +32,12 @@ export default function ExpenseHubPage() {
   ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <div className="space-y-5">
+      <PageHeader
+        title="Expenses"
+        subtitle="Record running costs as they happen — they feed into Profit & loss."
+      />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
       {expenseModules.map((module) => (
         <Link key={module.href} href={module.href}>
           <Card className="h-full transition-all hover:ring-2 hover:ring-primary hover:shadow-md group cursor-pointer">
@@ -51,6 +57,7 @@ export default function ExpenseHubPage() {
           </Card>
         </Link>
       ))}
+      </div>
     </div>
   );
 }

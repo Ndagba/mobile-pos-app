@@ -29,8 +29,23 @@ interface AuthState {
   /** True once restore() has run — guards wait for this before redirecting. */
   hydrated: boolean;
   login: (username: string, password: string) => Promise<void>;
+  signup: (payload: SignupPayload) => Promise<void>;
   logout: () => Promise<void>;
   restore: () => Promise<void>;
+}
+
+/**
+ * Self-serve store sign-up (login handoff §Sign up). The backend endpoint does
+ * not exist yet, so this is only reachable when NEXT_PUBLIC_ENABLE_SIGNUP is on;
+ * it posts the business + admin details and expects the same `{access_token,
+ * refresh_token, user}` payload as login.
+ */
+export interface SignupPayload {
+  businessName: string;
+  fullName: string;
+  phone: string;
+  email: string;
+  password: string;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -58,6 +73,26 @@ export const useAuthStore = create<AuthState>((set) => ({
       const err = e as { response?: { data?: { message?: string } }; message?: string };
       const message =
         err?.response?.data?.message || err?.message || 'Login failed';
+      set({ status: 'error', error: message, user: null });
+      throw e;
+    }
+  },
+
+  async signup(payload) {
+    set({ status: 'loading', error: null });
+    try {
+      const data = await apiClient.post<LoginResponse>('/auth/register', payload);
+      await webTokenStorage.saveTokens({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token
+      });
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+      }
+      set({ user: data.user, status: 'authenticated', error: null, hydrated: true });
+    } catch (e) {
+      const err = e as { response?: { data?: { message?: string } }; message?: string };
+      const message = err?.response?.data?.message || err?.message || 'Sign-up failed';
       set({ status: 'error', error: message, user: null });
       throw e;
     }

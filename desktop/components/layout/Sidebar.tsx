@@ -63,12 +63,12 @@ export function Sidebar() {
           'group flex h-9 items-center gap-3 rounded-lg px-2.5 text-sm transition-colors',
           collapsed && 'justify-center px-0',
           isActive
-            ? 'bg-primary-soft font-bold text-primary-ink'
-            : 'font-medium text-[#3A3848] hover:bg-surface-subtle'
+            ? 'bg-white/[0.1] font-bold text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]'
+            : 'font-medium text-[#C9C2F5] hover:bg-white/[0.06] hover:text-white'
         )}
       >
         <item.icon
-          className={cn('h-[18px] w-[18px] shrink-0', isActive ? 'text-primary' : 'text-text-muted')}
+          className={cn('h-[18px] w-[18px] shrink-0', isActive ? 'text-[#A99BFF]' : 'text-[#8B81C4]')}
         />
         {!collapsed && (
           <>
@@ -79,7 +79,7 @@ export function Sidebar() {
               </span>
             )}
             {item.shortcut && badge === null && (
-              <kbd className="rounded-chip border border-border-strong bg-surface-subtle px-1.5 py-0.5 font-mono text-[11px] text-text-faint">
+              <kbd className="rounded-chip border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[11px] text-[#9A90D0]">
                 {item.shortcut}
               </kbd>
             )}
@@ -95,17 +95,22 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        'flex shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-180 ease-out',
+        'flex shrink-0 flex-col border-r border-white/5 text-white transition-[width] duration-180 ease-out',
         collapsed ? 'w-[72px]' : 'w-[248px]'
       )}
+      style={{
+        // Deep-indigo gradient drawn from the login scene (#2A1F7A → #140F3D → #0B0824).
+        background:
+          'radial-gradient(130% 80% at 20% 0%, #2A1F7A 0%, #171046 45%, #0F0A30 100%)'
+      }}
     >
       {/* Logo row */}
       <div className={cn('flex h-[60px] items-center gap-2.5 px-4', collapsed && 'justify-center px-0')}>
         <Image src="/icon.svg" alt="JayPOS" width={32} height={32} className="rounded-[9px]" priority />
         {!collapsed && (
           <span className="text-[19px] font-extrabold leading-none tracking-[-0.04em]">
-            <span className="text-ink">Jay</span>
-            <span className="text-primary">POS</span>
+            <span className="text-white">Jay</span>
+            <span className="text-[#A99BFF]">POS</span>
           </span>
         )}
       </div>
@@ -118,7 +123,7 @@ export function Sidebar() {
           return (
             <div key={group.label} className="mb-1 mt-3 first:mt-1">
               {!collapsed && (
-                <p className="px-2.5 pb-1.5 text-[10.5px] font-bold uppercase tracking-[0.08em] text-text-faint">
+                <p className="px-2.5 pb-1.5 text-[10.5px] font-bold uppercase tracking-[0.08em] text-white/35">
                   {group.label}
                 </p>
               )}
@@ -129,7 +134,7 @@ export function Sidebar() {
       </nav>
 
       {/* Footer: user card + menu, collapse toggle */}
-      <div className="relative border-t border-divider p-3">
+      <div className="relative border-t border-white/10 p-3">
         {menuOpen && (
           <>
             <div className="fixed inset-0 z-30" onClick={() => setMenuOpen(false)} aria-hidden />
@@ -171,24 +176,24 @@ export function Sidebar() {
           type="button"
           onClick={() => setMenuOpen((v) => !v)}
           className={cn(
-            'flex w-full items-center gap-2.5 rounded-lg p-1.5 text-left transition-colors hover:bg-surface-subtle',
+            'flex w-full items-center gap-2.5 rounded-lg p-1.5 text-left transition-colors hover:bg-white/5',
             collapsed && 'justify-center'
           )}
         >
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-pill bg-primary-soft font-mono text-xs font-semibold text-primary-ink">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-pill bg-white/10 font-mono text-xs font-semibold text-white">
             {initials(user?.first_name, user?.email)}
           </span>
           {!collapsed && (
             <>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold text-ink-2">
+                <span className="block truncate text-sm font-semibold text-white">
                   {user?.first_name || user?.email || 'User'}
                 </span>
-                <span className="block truncate text-2xs capitalize text-text-muted">
+                <span className="block truncate text-2xs capitalize text-[#A79FD6]">
                   {user?.is_super_admin ? 'Super admin' : user?.role}
                 </span>
               </span>
-              <ChevronUp className="h-4 w-4 shrink-0 text-text-faint" />
+              <ChevronUp className="h-4 w-4 shrink-0 text-white/40" />
             </>
           )}
         </button>
@@ -198,7 +203,7 @@ export function Sidebar() {
           onClick={toggleSidebar}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           className={cn(
-            'mt-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-text-muted transition-colors hover:bg-surface-subtle',
+            'mt-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-[#9A90D0] transition-colors hover:bg-white/5 hover:text-white',
             collapsed && 'justify-center px-0'
           )}
         >

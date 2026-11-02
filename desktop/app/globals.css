@@ -105,3 +105,34 @@
   .jp-modal-in { animation: jp-modal-in 0.18s ease-out; }
   .jp-drawer-in { animation: jp-drawer-in 0.2s ease; }
 }
+
+/* Print: show only the tagged region (a receipt or a report), laid out on a
+   clean white page. Whichever region is in the DOM at print time is the one
+   that shows. */
+@media print {
+  body { background: #fff; }
+  body * { visibility: hidden; }
+  #receipt-print,
+  #receipt-print *,
+  #report-print,
+  #report-print * { visibility: visible; }
+  #receipt-print,
+  #report-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    border: 0;
+    padding: 0;
+  }
+  /* Print-only elements (report heading) and overflow unlocked for full tables. */
+  .print-only { display: block !important; }
+  /* The region flows the full length of the page (can break across pages) and
+     is pulled to the page origin so the hidden app layout leaves no gap. */
+  #receipt-print,
+  #report-print {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}
+.print-only { display: none; }

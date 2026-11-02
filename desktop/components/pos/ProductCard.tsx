@@ -42,19 +42,19 @@ export function ProductCard({
           : 'hover:border-primary-border hover:shadow-card-hover'
       )}
     >
-      <div className="relative aspect-square w-full bg-muted">
+      <div className="relative aspect-[4/3] w-full bg-muted">
         {fullImageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={fullImageUrl} alt="" className="h-full w-full object-cover" />
         ) : (
-          <span className="flex h-full w-full items-center justify-center font-mono text-3xl font-semibold text-text-faint">
+          <span className="flex h-full w-full items-center justify-center font-mono text-2xl font-semibold text-text-faint">
             {product.name?.charAt(0).toUpperCase() ?? '?'}
           </span>
         )}
         {status !== 'IN_STOCK' && (
           <span
             className={cn(
-              'absolute right-2 top-2 rounded-pill px-1.5 py-0.5 text-2xs font-semibold',
+              'absolute right-1.5 top-1.5 rounded-pill px-1.5 py-0.5 text-2xs font-semibold',
               status === 'OUT_OF_STOCK' ? 'bg-danger-soft text-danger' : 'bg-warning-soft text-warning'
             )}
           >
@@ -63,20 +63,20 @@ export function ProductCard({
         )}
       </div>
 
-      <div className="flex flex-1 flex-col gap-1 p-2.5">
-        <span className="line-clamp-2 text-sm font-semibold leading-tight text-ink-2">
+      <div className="flex flex-1 flex-col gap-0.5 p-1.5">
+        <span className="line-clamp-2 text-[11.5px] font-semibold leading-tight text-ink-2">
           {product.name}
         </span>
         {product.location?.name && !isService && (
-          <span className="flex items-center gap-1 text-[11.5px] text-text-muted">
-            <MapPin className="h-3 w-3 shrink-0" />
+          <span className="flex items-center gap-0.5 text-[10px] text-text-muted">
+            <MapPin className="h-2.5 w-2.5 shrink-0" />
             <span className="truncate">{product.location.name}</span>
           </span>
         )}
-        <div className="mt-auto flex items-center justify-between pt-1">
-          <span className="font-mono text-md font-semibold text-ink">{naira(price)}</span>
+        <div className="mt-auto flex items-center justify-between gap-1 pt-0.5">
+          <span className="font-mono text-xs font-semibold text-ink">{naira(price)}</span>
           <span className="text-2xs text-text-faint">
-            {isService ? 'Service' : out ? '' : `${available} in stock`}
+            {isService ? 'Svc' : out ? '' : `${available}`}
           </span>
         </div>
       </div>

@@ -1,5 +1,6 @@
 'use client';
 
+import { Printer } from 'lucide-react';
 import { naira } from '@jaypos/shared';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
@@ -60,61 +61,72 @@ export function ReceiptModal({ data, onClose }: { data: ReceiptData | null; onCl
 
   return (
     <Modal open onClose={onClose} title="Receipt">
-      <div className="space-y-4 p-4">
-        <div
-          className={cn(
-            'rounded-md px-3 py-2 text-sm',
-            synced ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-          )}
-        >
-          {synced ? 'Sale completed.' : 'Saved offline — it will sync when you’re back online.'}
-        </div>
-
-        <div className="rounded-md border bg-background p-4 font-mono text-xs leading-relaxed">
-          <div className="text-center">
-            <p className="text-sm font-semibold">{data.storeLabel}</p>
-            <p className="text-muted-foreground">{data.branchLabel}</p>
+      {/* Flex column bounded to the modal: the receipt scrolls, the action bar
+          stays pinned so "Done"/"Print" are never clipped on a long receipt. */}
+      <div className="flex max-h-[calc(90vh-56px)] flex-col print:max-h-none print:overflow-visible">
+        <div className="flex-1 space-y-4 overflow-y-auto p-5 print:overflow-visible">
+          <div
+            className={cn(
+              'rounded-lg px-3 py-2 text-sm',
+              synced ? 'bg-success-soft text-success' : 'bg-warning-soft text-warning'
+            )}
+          >
+            {synced ? 'Sale completed.' : 'Saved offline — it will sync when you’re back online.'}
           </div>
 
-          <div className="my-2 border-t border-dashed" />
-          <p>Receipt: {data.receiptNumber}</p>
-          <p>Date: {data.at.toLocaleString()}</p>
-          {data.customerName && <p>Customer: {data.customerName}</p>}
-          <p>Payment: {data.paymentLabel}</p>
-          {data.paymentSplits && (
-            <div className="pl-2 space-y-0.5 text-muted-foreground">
-              {data.paymentSplits.cash > 0 && <p>• Cash: {naira(data.paymentSplits.cash)}</p>}
-              {data.paymentSplits.card > 0 && <p>• Card: {naira(data.paymentSplits.card)}</p>}
-              {data.paymentSplits.transfer > 0 && <p>• Transfer: {naira(data.paymentSplits.transfer)}</p>}
+          <div
+            id="receipt-print"
+            className="rounded-lg border border-divider bg-surface-subtle p-4 font-mono text-xs leading-relaxed text-ink-2"
+          >
+            <div className="text-center">
+              <p className="text-sm font-semibold text-ink">{data.storeLabel}</p>
+              <p className="text-text-muted">{data.branchLabel}</p>
             </div>
-          )}
 
-          <div className="my-2 border-t border-dashed" />
-          {data.lines.map((l, i) => (
-            <div key={i} className="mb-1">
-              <p className="truncate">{l.name}</p>
-              <div className="flex justify-between text-muted-foreground">
-                <span>
-                  {l.quantity} x {naira(l.unit_price)}
-                </span>
-                <span className="tabular-nums text-foreground">{naira(l.line_total)}</span>
+            <div className="my-2 border-t border-dashed border-border-strong" />
+            <p>Receipt: {data.receiptNumber}</p>
+            <p>Date: {data.at.toLocaleString()}</p>
+            {data.customerName && <p>Customer: {data.customerName}</p>}
+            <p>Payment: {data.paymentLabel}</p>
+            {data.paymentSplits && (
+              <div className="space-y-0.5 pl-2 text-text-muted">
+                {data.paymentSplits.cash > 0 && <p>• Cash: {naira(data.paymentSplits.cash)}</p>}
+                {data.paymentSplits.card > 0 && <p>• Card: {naira(data.paymentSplits.card)}</p>}
+                {data.paymentSplits.transfer > 0 && <p>• Transfer: {naira(data.paymentSplits.transfer)}</p>}
               </div>
-            </div>
-          ))}
+            )}
 
-          <div className="my-2 border-t border-dashed" />
-          <Row label="Subtotal" value={naira(data.subtotal)} />
-          <Row label="VAT" value={naira(data.tax_amount)} />
-          {data.discount_amount > 0 && (
-            <Row label="Discount" value={`- ${naira(data.discount_amount)}`} />
-          )}
-          <Row label="TOTAL" value={naira(data.total)} bold />
+            <div className="my-2 border-t border-dashed border-border-strong" />
+            {data.lines.map((l, i) => (
+              <div key={i} className="mb-1">
+                <p className="truncate">{l.name}</p>
+                <div className="flex justify-between text-text-muted">
+                  <span>
+                    {l.quantity} x {naira(l.unit_price)}
+                  </span>
+                  <span className="tabular-nums text-ink">{naira(l.line_total)}</span>
+                </div>
+              </div>
+            ))}
 
-          <div className="my-2 border-t border-dashed" />
-          <p className="text-center text-muted-foreground">{data.footer}</p>
+            <div className="my-2 border-t border-dashed border-border-strong" />
+            <Row label="Subtotal" value={naira(data.subtotal)} />
+            <Row label="VAT" value={naira(data.tax_amount)} />
+            {data.discount_amount > 0 && (
+              <Row label="Discount" value={`- ${naira(data.discount_amount)}`} />
+            )}
+            <Row label="TOTAL" value={naira(data.total)} bold />
+
+            <div className="my-2 border-t border-dashed border-border-strong" />
+            <p className="text-center text-text-muted">{data.footer}</p>
+          </div>
         </div>
 
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-2 border-t border-divider p-4">
+          <Button variant="outline" onClick={() => window.print()}>
+            <Printer className="h-4 w-4" />
+            Print
+          </Button>
           <Button onClick={onClose}>Done</Button>
         </div>
       </div>

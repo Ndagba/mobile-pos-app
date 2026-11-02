@@ -24,6 +24,11 @@ export interface TransactionRow {
   created_at: string;
   is_sync_online?: boolean;
   item_count?: number;
+  /** Present only when the list is fetched with `includeItems` (product names per line). */
+  transaction_items?: Array<{
+    quantity: number | string;
+    product?: { name?: string | null; sku?: string | null } | null;
+  }>;
   user?: { first_name?: string | null } | null;
   customer?: { first_name?: string | null; phone?: string | null } | null;
 }
@@ -37,6 +42,8 @@ export interface TransactionFilters {
   userId?: string;
   limit?: number;
   offset?: number;
+  /** Include each sale's line items (product names) in the response. */
+  includeItems?: boolean;
 }
 
 export interface TransactionHistory {
@@ -62,6 +69,7 @@ async function fetchTransactions(f: TransactionFilters): Promise<TransactionHist
   if (f.paymentMethod) params.set('paymentMethod', f.paymentMethod);
   if (f.status) params.set('status', f.status);
   if (f.userId) params.set('userId', f.userId);
+  if (f.includeItems) params.set('includeItems', 'true');
 
   // The list endpoint is double-nested (`data.data`); apiClient unwraps exactly
   // one envelope level, so this resolves to the inner { data, netSum, pagination }.

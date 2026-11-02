@@ -28,8 +28,8 @@ export function ProductGrid({
 
   return (
     <div
-      className="grid gap-3"
-      style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}
+      className="grid gap-2"
+      style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(118px, 1fr))' }}
     >
       {products.map((p) => (
         <ProductCard key={p.id} product={p} onSelect={onSelect} />

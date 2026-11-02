@@ -34,9 +34,9 @@ export function Modal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:static print:z-auto print:block print:p-0">
       <div
-        className="jp-scrim-in absolute inset-0 bg-[rgba(14,14,16,0.32)]"
+        className="jp-scrim-in absolute inset-0 bg-[rgba(14,14,16,0.32)] print:hidden"
         onClick={onClose}
         aria-hidden
       />
@@ -45,6 +45,7 @@ export function Modal({
         aria-modal="true"
         className={cn(
           'jp-modal-in relative z-10 max-h-[90vh] w-full max-w-md overflow-hidden rounded-modal border bg-card shadow-modal',
+          'print:static print:max-h-none print:w-full print:max-w-full print:overflow-visible print:rounded-none print:border-0 print:shadow-none',
           className
         )}
       >

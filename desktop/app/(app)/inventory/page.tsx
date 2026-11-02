@@ -2,7 +2,9 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
+import { History, Pencil, Trash2 } from 'lucide-react';
 import type { Product, Category, Location } from '@jaypos/shared';
+import { naira } from '@jaypos/shared';
 import { useProducts } from '@/hooks/useProducts';
 import { useCategories } from '@/hooks/useCategories';
 import { useLocations } from '@/hooks/useLocations';
@@ -15,6 +17,8 @@ import { useLocationMutations } from '@/hooks/useLocationMutations';
 import { useAuthStore } from '@/store/authStore';
 import { isAdmin } from '@/lib/roles';
 import { apiErrorMessage } from '@/lib/errors';
+import { numify } from '@/lib/normalize';
+import { stockBadgeInfo } from '@/lib/inventory';
 import { useExpiringBatches } from '@/hooks/useExpiringBatches';
 import { Input } from '@/components/ui/input';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -100,6 +104,24 @@ export default function InventoryPage() {
     'low-stock': lowStock.length,
   };
 
+  // Summary strip (handoff): stock value at cost, product count, and low / out
+  // counts — derived from the same classification the row badges use.
+  const summary = useMemo(() => {
+    let stockValue = 0;
+    let productCount = 0;
+    let low = 0;
+    let out = 0;
+    for (const p of products) {
+      const info = stockBadgeInfo(p);
+      if (info.isService) continue;
+      productCount += 1;
+      stockValue += info.quantity * (numify(p.cost_price) ?? 0);
+      if (info.status === 'LOW') low += 1;
+      else if (info.status === 'OUT_OF_STOCK') out += 1;
+    }
+    return { stockValue, productCount, low, out };
+  }, [products]);
+
   const q = search.trim().toLowerCase();
   const visibleProducts = useMemo(() => {
     let list = products;
@@ -110,7 +132,8 @@ export default function InventoryPage() {
         (p) =>
           p.name?.toLowerCase().includes(q) ||
           p.sku?.toLowerCase().includes(q) ||
-          p.barcode?.toLowerCase().includes(q)
+          p.barcode?.toLowerCase().includes(q) ||
+          p.location?.name?.toLowerCase().includes(q)
       );
     }
     return list;
@@ -214,6 +237,13 @@ export default function InventoryPage() {
         <BranchFilter branches={branches} selected={branchId} onSelect={setBranchId} />
       )}
 
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-card border border-border bg-divider sm:grid-cols-4">
+        <Stat label="Stock value (cost)" value={naira(summary.stockValue)} />
+        <Stat label="Products" value={String(summary.productCount)} />
+        <Stat label="Low stock" value={String(summary.low)} warning={summary.low > 0} />
+        <Stat label="Out of stock" value={String(summary.out)} danger={summary.out > 0} />
+      </div>
+
       <InventoryTabs active={tab} onChange={setTab} counts={counts} />
 
       {isProductTab && (
@@ -221,7 +251,7 @@ export default function InventoryPage() {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, SKU or barcode"
+            placeholder="Name, SKU or shelf location"
             className="max-w-xs"
           />
           <Select
@@ -247,31 +277,45 @@ export default function InventoryPage() {
             showBranch={multiBranch && !branchId}
             branchName={branchName}
             renderRowActions={(p) => (
-              <div className="flex justify-end gap-1.5">
+              <div className="flex items-center justify-end gap-1">
                 {p.item_type !== 'SERVICE' && (
                   <>
                     <Button size="sm" variant="outline" onClick={() => setAdjustProduct(p)}>
                       Adjust
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setLedgerProduct(p)}>
-                      Ledger
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label="Movement history"
+                      title="Movement history"
+                      onClick={() => setLedgerProduct(p)}
+                    >
+                      <History className="h-4 w-4" />
                     </Button>
                   </>
                 )}
-                <Button size="sm" variant="ghost" onClick={() => openEditProduct(p)}>
-                  Edit
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label="Edit product"
+                  title="Edit"
+                  onClick={() => openEditProduct(p)}
+                >
+                  <Pencil className="h-4 w-4" />
                 </Button>
                 {admin && (
                   <Button
-                    size="sm"
+                    size="icon"
                     variant="ghost"
-                    className="text-destructive hover:text-destructive"
+                    aria-label="Delete product"
+                    title="Delete"
+                    className="text-danger hover:text-danger"
                     onClick={() => {
                       setDeleteError(null);
                       setDeleteProduct(p);
                     }}
                   >
-                    Delete
+                    <Trash2 className="h-4 w-4" />
                   </Button>
                 )}
               </div>
@@ -453,6 +497,33 @@ export default function InventoryPage() {
         pending={locationMut.remove.isPending}
         error={deleteError}
       />
+    </div>
+  );
+}
+
+/** One cell of the inventory summary strip. */
+function Stat({
+  label,
+  value,
+  warning,
+  danger,
+}: {
+  label: string;
+  value: string;
+  warning?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <div className="bg-card px-4 py-3">
+      <p className="text-2xs font-semibold uppercase tracking-wide text-text-muted">{label}</p>
+      <p
+        className={cn(
+          'mt-1 font-mono text-xl font-bold tabular-nums',
+          danger ? 'text-danger' : warning ? 'text-warning' : 'text-ink'
+        )}
+      >
+        {value}
+      </p>
     </div>
   );
 }

@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Printer } from 'lucide-react';
 import { naira } from '@jaypos/shared';
 import { usePurchaseOrder } from '@/hooks/usePurchaseOrder';
 import { usePurchaseOrderMutations } from '@/hooks/usePurchaseOrderMutations';
@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import { POStatusBadge } from '@/components/purchasing/POStatusBadge';
 import { ReceiveGoodsModal } from '@/components/purchasing/ReceiveGoodsModal';
 import { ReceiptHistory } from '@/components/purchasing/ReceiptHistory';
+import { PurchaseOrderPrint } from '@/components/purchasing/PurchaseOrderPrint';
 
 function fmtDate(s?: string | null): string {
   if (!s) return '—';
@@ -43,6 +44,19 @@ export default function PurchaseOrderDetailPage() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   const po = poQ.data;
+
+  // Deep-link print: `/purchasing/:id?print=1` (used by the list-row print button)
+  // opens the browser print dialog once the PO has loaded. Read from the URL in the
+  // effect (not useSearchParams) to avoid a build-time Suspense boundary.
+  const printedRef = useRef(false);
+  useEffect(() => {
+    if (!po || printedRef.current) return;
+    const wantsPrint = new URLSearchParams(window.location.search).get('print') === '1';
+    if (!wantsPrint) return;
+    printedRef.current = true;
+    const t = setTimeout(() => window.print(), 350);
+    return () => clearTimeout(t);
+  }, [po]);
 
   if (poQ.isLoading && !po) {
     return (
@@ -120,6 +134,10 @@ export default function PurchaseOrderDetailPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => window.print()}>
+            <Printer className="h-4 w-4" />
+            Print
+          </Button>
           {canSubmit && (
             <Button onClick={submitOrder} disabled={update.isPending}>
               {update.isPending && <Spinner className="h-4 w-4" />}
@@ -212,6 +230,8 @@ export default function PurchaseOrderDetailPage() {
           <ReceiptHistory po={po} />
         </section>
       </div>
+
+      <PurchaseOrderPrint po={po} />
 
       <ReceiveGoodsModal open={receiveOpen} onClose={() => setReceiveOpen(false)} po={po} />
       <ConfirmDialog

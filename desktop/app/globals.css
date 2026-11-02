@@ -115,9 +115,12 @@
   #receipt-print,
   #receipt-print *,
   #report-print,
-  #report-print * { visibility: visible; }
+  #report-print *,
+  #po-print,
+  #po-print * { visibility: visible; }
   #receipt-print,
-  #report-print {
+  #report-print,
+  #po-print {
     position: absolute;
     left: 0;
     top: 0;
@@ -130,7 +133,8 @@
   /* The region flows the full length of the page (can break across pages) and
      is pulled to the page origin so the hidden app layout leaves no gap. */
   #receipt-print,
-  #report-print {
+  #report-print,
+  #po-print {
     max-height: none !important;
     overflow: visible !important;
   }

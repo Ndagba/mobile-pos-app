@@ -319,9 +319,24 @@ export class TransactionService {
       status?: string;
       branchId?: string;
       userId?: string;
+      /** Free-text match on receipt number, customer name or cashier name. */
+      search?: string;
+      /** When true, include transaction line items (+ product name/sku) and the full cashier name. */
+      includeItems?: boolean;
     }
   ) {
     const where: any = { store_id: storeId };
+
+    const search = filters?.search?.trim();
+    if (search) {
+      where.OR = [
+        { receipt_number: { contains: search, mode: 'insensitive' } },
+        { customer: { first_name: { contains: search, mode: 'insensitive' } } },
+        { customer: { last_name: { contains: search, mode: 'insensitive' } } },
+        { user: { first_name: { contains: search, mode: 'insensitive' } } },
+        { user: { last_name: { contains: search, mode: 'insensitive' } } }
+      ];
+    }
 
     if (filters?.dateFrom || filters?.dateTo) {
       where.created_at = {};
@@ -349,9 +364,16 @@ export class TransactionService {
       prisma.transaction.findMany({
         where,
         include: {
-          user: { select: { first_name: true } },
-          customer: { select: { first_name: true, phone: true } },
-          _count: { select: { transaction_items: true } }
+          user: { select: { first_name: true, last_name: true } },
+          customer: { select: { first_name: true, last_name: true, phone: true } },
+          _count: { select: { transaction_items: true } },
+          ...(filters?.includeItems
+            ? {
+                transaction_items: {
+                  include: { product: { select: { name: true, sku: true } } },
+                },
+              }
+            : {}),
         },
         orderBy: { created_at: 'desc' },
         take: limit,

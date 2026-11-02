@@ -3,6 +3,7 @@ import { TransactionService } from '../../services/TransactionService';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { requireActiveSubscription } from '../middleware/featureGate.middleware';
 import { catchAsync, AppError } from '../../utils/errorHandler';
+import { prisma } from '../../lib/prisma';
 
 const router = Router();
 
@@ -82,6 +83,8 @@ router.get(
         status: status as string,
         branchId: branchId && branchId !== 'null' && branchId !== 'undefined' ? branchId as string : undefined,
         userId: req.query.userId ? req.query.userId as string : undefined,
+        search: req.query.search ? (req.query.search as string) : undefined,
+        includeItems: req.query.includeItems === 'true',
       }
     );
 
@@ -112,8 +115,15 @@ router.post(
     const { reason } = req.body;
     const user = (req as any).user;
 
-    if (user.role !== 'admin') {
-      throw new AppError(403, 'Only admins can process refunds');
+    // Admins and managers may always refund; a cashier may refund only when the
+    // store setting `allow_cashier_refund` is enabled.
+    if (user.role !== 'admin' && user.role !== 'manager') {
+      const setting = await prisma.storeSetting.findUnique({
+        where: { store_id: user.storeId }
+      });
+      if (!setting?.allow_cashier_refund) {
+        throw new AppError(403, 'You are not allowed to process refunds');
+      }
     }
 
     const result = await TransactionService.refundTransaction(

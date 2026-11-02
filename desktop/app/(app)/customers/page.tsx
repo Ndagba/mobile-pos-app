@@ -12,9 +12,19 @@ import { Badge } from '@/components/ui/badge';
 import { CustomerStats } from '@/components/customers/CustomerStats';
 import { CustomerForm } from '@/components/customers/CustomerForm';
 import { useCustomers, useCreateCustomer, useUpdateCustomer, useDeleteCustomer, useCustomerSummary } from '@/hooks/useCustomers';
+import { useSettings } from '@/hooks/useSettings';
+import { useAuthStore } from '@/store/authStore';
 import { naira } from '@jaypos/shared';
 
 export default function CustomersPage() {
+  const user = useAuthStore((s) => s.user);
+  const { settings } = useSettings();
+  // Cashier add/edit of customers is gated by store settings (admins/managers
+  // always allowed). A missing setting defaults to allowed.
+  const isCashier = user?.role === 'cashier' && !user?.is_super_admin;
+  const canAddCustomers = !isCashier || settings?.allow_cashier_add_customers !== false;
+  const canEditCustomers = !isCashier || settings?.allow_cashier_edit_customers !== false;
+
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'vip' | 'new'>('all');
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -103,10 +113,12 @@ export default function CustomersPage() {
         title="Customers"
         subtitle="Purchase history, credit balances and one-click selling."
         actions={
-          <Button onClick={openCreate}>
-            <UserPlus className="h-4 w-4" />
-            Add customer
-          </Button>
+          canAddCustomers ? (
+            <Button onClick={openCreate}>
+              <UserPlus className="h-4 w-4" />
+              Add customer
+            </Button>
+          ) : null
         }
       />
 
@@ -175,12 +187,18 @@ export default function CustomersPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-center gap-2">
-                      <Button variant="ghost" size="icon" onClick={() => openEdit(c)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDelete(c.id)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {canEditCustomers ? (
+                        <>
+                          <Button variant="ghost" size="icon" onClick={() => openEdit(c)}>
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDelete(c.id)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </>
+                      ) : (
+                        <span className="text-xs text-text-faint">—</span>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

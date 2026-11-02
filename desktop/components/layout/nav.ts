@@ -84,9 +84,35 @@ export const NAV_GROUPS: NavGroup[] = [
   }
 ];
 
+/** The cashier menu-visibility toggles from store settings (customer/supplier). */
+export interface MenuToggles {
+  customer_menu_enabled?: boolean;
+  supplier_menu_enabled?: boolean;
+}
+
+/**
+ * Whether a nav item should show, combining the role gate with the cashier
+ * menu toggles. The Customer/Supplier menu toggles only hide the item from
+ * **cashiers** (admins/managers always see them). A missing/undefined setting is
+ * treated as enabled so the menu never flickers while settings load.
+ */
+export function navItemAllowed(
+  item: NavItem,
+  user: AuthUser | null,
+  settings?: MenuToggles | null
+): boolean {
+  if (item.visible && !item.visible(user)) return false;
+  const isCashier = user?.role === 'cashier' && !user?.is_super_admin;
+  if (isCashier) {
+    if (item.href === '/customers' && settings?.customer_menu_enabled === false) return false;
+    if (item.href === '/suppliers' && settings?.supplier_menu_enabled === false) return false;
+  }
+  return true;
+}
+
 /** Flat, role-filtered item list — used by the command menu and active matching. */
-export function visibleNavItems(user: AuthUser | null): NavItem[] {
-  return NAV_GROUPS.flatMap((g) => g.items).filter((i) => !i.visible || i.visible(user));
+export function visibleNavItems(user: AuthUser | null, settings?: MenuToggles | null): NavItem[] {
+  return NAV_GROUPS.flatMap((g) => g.items).filter((i) => navItemAllowed(i, user, settings));
 }
 
 /**

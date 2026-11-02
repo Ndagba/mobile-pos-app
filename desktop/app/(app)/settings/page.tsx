@@ -1,14 +1,18 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import { useSettings, type StoreSettings } from '@/hooks/useSettings';
 import { Card } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { PageHeader } from '@/components/ui/page-header';
 import { toast } from 'sonner';
-import { Loader2, ShieldCheck, Store, Percent, Printer, Lock } from 'lucide-react';
+import { Loader2, ShieldCheck } from 'lucide-react';
 
 const SHORTCUTS: [string, string][] = [
   ['Command menu', 'Ctrl K'],
@@ -22,6 +26,24 @@ const SHORTCUTS: [string, string][] = [
 export default function SettingsPage() {
   const { user } = useAuthStore();
   const { settings, isLoading, updateSettings, isUpdating } = useSettings();
+
+  // Editable (save-on-click) sections, hydrated once settings load.
+  const [profile, setProfile] = useState({ business_name: '', rc_number: '', store_address: '' });
+  const [taxRate, setTaxRate] = useState('');
+  const [footer, setFooter] = useState('');
+  const [maxDiscount, setMaxDiscount] = useState('');
+
+  useEffect(() => {
+    if (!settings) return;
+    setProfile({
+      business_name: settings.business_name ?? '',
+      rc_number: settings.rc_number ?? '',
+      store_address: settings.store_address ?? '',
+    });
+    setTaxRate(settings.tax_rate != null ? String(settings.tax_rate) : '');
+    setFooter(settings.receipt_footer ?? '');
+    setMaxDiscount(settings.max_discount_percent != null ? String(settings.max_discount_percent) : '');
+  }, [settings]);
 
   if (user?.role === 'cashier') {
     return (
@@ -49,16 +71,27 @@ export default function SettingsPage() {
     try {
       await updateSettings({ [key]: value });
       toast.success('Setting updated');
-    } catch (e) {
+    } catch {
       toast.error('Failed to update setting');
     }
   };
 
-  const toggles: { key: keyof StoreSettings; label: string; desc: string }[] = [
-    { key: 'allow_cashier_add_customers', label: 'Allow adding customers', desc: 'Cashiers can create new customer profiles during checkout.' },
-    { key: 'allow_cashier_edit_customers', label: 'Allow editing customers', desc: 'Cashiers can modify existing customer contact details.' },
-    { key: 'customer_menu_enabled', label: 'Customer menu enabled', desc: 'Show the Customers menu in the sidebar for cashiers.' },
-    { key: 'supplier_menu_enabled', label: 'Supplier menu enabled', desc: 'Show the Suppliers menu in the sidebar for cashiers.' },
+  const save = async (payload: Partial<StoreSettings>, label: string) => {
+    try {
+      await updateSettings(payload);
+      toast.success(`${label} saved`);
+    } catch {
+      toast.error(`Could not save ${label.toLowerCase()}`);
+    }
+  };
+
+  const toggles: { key: keyof StoreSettings; label: string; desc: string; fallback?: boolean }[] = [
+    { key: 'allow_cashier_add_customers', label: 'Allow adding customers', desc: 'Cashiers can create new customer profiles.' },
+    { key: 'allow_cashier_edit_customers', label: 'Allow editing customers', desc: 'Cashiers can edit or delete customers.' },
+    { key: 'customer_menu_enabled', label: 'Customer menu enabled', desc: 'Show the Customers menu to cashiers.' },
+    { key: 'supplier_menu_enabled', label: 'Supplier menu enabled', desc: 'Show the Suppliers menu to cashiers.' },
+    { key: 'allow_cashier_discount', label: 'Allow discounts', desc: 'Cashiers can apply a discount at checkout.', fallback: true },
+    { key: 'allow_cashier_refund', label: 'Allow refunds', desc: 'Cashiers can refund a completed sale.', fallback: false },
   ];
 
   return (
@@ -66,11 +99,76 @@ export default function SettingsPage() {
       <PageHeader title="Settings" subtitle="Store configuration and staff permissions." />
 
       <div className="space-y-5">
+        {/* Business profile */}
+        <SectionCard title="Business profile" subtitle="Printed at the top of every receipt.">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Business name">
+              <Input value={profile.business_name} onChange={(e) => setProfile((p) => ({ ...p, business_name: e.target.value }))} placeholder="e.g. Mama Jay Supermarket" />
+            </Field>
+            <Field label="RC number">
+              <Input value={profile.rc_number} onChange={(e) => setProfile((p) => ({ ...p, rc_number: e.target.value }))} placeholder="RC 1234567" />
+            </Field>
+            <div className="sm:col-span-2">
+              <Field label="Address">
+                <Input value={profile.store_address} onChange={(e) => setProfile((p) => ({ ...p, store_address: e.target.value }))} placeholder="Shop address" />
+              </Field>
+            </div>
+          </div>
+          <SaveBar onSave={() => save(profile, 'Business profile')} pending={isUpdating} />
+        </SectionCard>
+
+        {/* Tax */}
+        <SectionCard title="Tax" subtitle="VAT rate shown on receipts.">
+          <Field label="VAT rate (%)">
+            <Input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              max={100}
+              step="0.01"
+              value={taxRate}
+              onChange={(e) => setTaxRate(e.target.value)}
+              placeholder="7.5"
+              className="max-w-[160px]"
+            />
+          </Field>
+          <SaveBar
+            onSave={() => save({ tax_rate: taxRate === '' ? null : Number(taxRate) }, 'Tax rate')}
+            pending={isUpdating}
+          />
+        </SectionCard>
+
+        {/* Receipt */}
+        <SectionCard title="Receipt" subtitle="What appears on printed receipts.">
+          <div className="flex items-center justify-between gap-4 border-b border-divider pb-4">
+            <div>
+              <Label className="text-sm">Show store logo</Label>
+              <p className="mt-0.5 text-xs text-text-muted">Print the JayPOS mark on the receipt.</p>
+            </div>
+            <Switch
+              checked={settings?.receipt_show_logo ?? true}
+              onCheckedChange={(v) => handleToggle('receipt_show_logo', v)}
+              disabled={isUpdating}
+            />
+          </div>
+          <div className="pt-4">
+            <Field label="Receipt footer">
+              <Textarea
+                value={footer}
+                onChange={(e) => setFooter(e.target.value)}
+                placeholder="Thank you for your purchase!"
+                rows={2}
+              />
+            </Field>
+            <SaveBar onSave={() => save({ receipt_footer: footer.trim() || null }, 'Receipt footer')} pending={isUpdating} />
+          </div>
+        </SectionCard>
+
         {/* Cashier permissions */}
         <Card className="overflow-hidden">
           <div className="border-b border-divider px-5 py-4">
             <h2 className="text-md font-bold text-ink">Cashier permissions</h2>
-            <p className="text-xs text-text-muted">Control what staff can do within the POS.</p>
+            <p className="text-xs text-text-muted">Control what cashiers can do.</p>
           </div>
           <div className="divide-y divide-divider">
             {toggles.map((t) => (
@@ -80,34 +178,48 @@ export default function SettingsPage() {
                   <p className="mt-0.5 text-xs text-text-muted">{t.desc}</p>
                 </div>
                 <Switch
-                  checked={(settings?.[t.key] as boolean) ?? false}
+                  checked={(settings?.[t.key] as boolean) ?? t.fallback ?? false}
                   onCheckedChange={(v) => handleToggle(t.key, v)}
                   disabled={isUpdating}
                 />
               </div>
             ))}
-          </div>
-        </Card>
-
-        {/* Store configuration (new — backend pending) */}
-        <Card className="overflow-hidden">
-          <div className="border-b border-divider px-5 py-4">
-            <h2 className="text-md font-bold text-ink">Store configuration</h2>
-            <p className="text-xs text-text-muted">Business profile, tax and receipt printing.</p>
-          </div>
-          <div className="divide-y divide-divider">
-            <ComingSoonRow icon={<Store className="h-4 w-4" />} title="Business profile" desc="Store name, RC number and address printed on receipts." />
-            <ComingSoonRow icon={<Percent className="h-4 w-4" />} title="Tax" desc="VAT rate added on top of shelf price." />
-            <ComingSoonRow icon={<Printer className="h-4 w-4" />} title="Receipt footer" desc="Custom message printed at the bottom of each receipt." />
+            <div className="flex items-center justify-between gap-4 px-5 py-4">
+              <div className="min-w-0">
+                <Label className="text-sm">Max discount a cashier can give (%)</Label>
+                <p className="mt-0.5 text-xs text-text-muted">Leave blank for no limit. Admins/managers are never limited.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={maxDiscount}
+                  onChange={(e) => setMaxDiscount(e.target.value)}
+                  placeholder="∞"
+                  className="w-24 text-right"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isUpdating}
+                  onClick={() =>
+                    save(
+                      { max_discount_percent: maxDiscount === '' ? null : Math.round(Number(maxDiscount)) },
+                      'Max discount'
+                    )
+                  }
+                >
+                  Save
+                </Button>
+              </div>
+            </div>
           </div>
         </Card>
 
         {/* Keyboard shortcuts */}
-        <Card className="overflow-hidden">
-          <div className="border-b border-divider px-5 py-4">
-            <h2 className="text-md font-bold text-ink">Keyboard shortcuts</h2>
-          </div>
-          <div className="grid grid-cols-1 gap-x-8 gap-y-2 px-5 py-4 sm:grid-cols-2">
+        <SectionCard title="Keyboard shortcuts">
+          <div className="grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
             {SHORTCUTS.map(([label, key]) => (
               <div key={label} className="flex items-center justify-between">
                 <span className="text-sm text-ink-2">{label}</span>
@@ -117,30 +229,40 @@ export default function SettingsPage() {
               </div>
             ))}
           </div>
-        </Card>
+        </SectionCard>
       </div>
     </div>
   );
 }
 
-function ComingSoonRow({ icon, title, desc }: { icon: React.ReactNode; title: string; desc: string }) {
+function SectionCard({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4 px-5 py-4">
-      <div className="flex items-start gap-3">
-        <span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-text-muted">
-          {icon}
-        </span>
-        <div>
-          <p className="text-sm font-semibold text-ink-2">{title}</p>
-          <p className="mt-0.5 text-xs text-text-muted">{desc}</p>
-        </div>
+    <Card className="p-5">
+      <div className="mb-4">
+        <h2 className="text-md font-bold text-ink">{title}</h2>
+        {subtitle && <p className="text-xs text-text-muted">{subtitle}</p>}
       </div>
-      <span
-        title="Coming soon — this setting is not yet available in the backend."
-        className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-muted px-2 py-1 text-2xs font-semibold text-text-faint"
-      >
-        <Lock className="h-3 w-3" /> Coming soon
-      </span>
+      {children}
+    </Card>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <Label>{label}</Label>
+      {children}
+    </div>
+  );
+}
+
+function SaveBar({ onSave, pending }: { onSave: () => void; pending: boolean }) {
+  return (
+    <div className="mt-4 flex justify-end">
+      <Button size="sm" onClick={onSave} disabled={pending}>
+        {pending && <Spinner className="h-4 w-4" />}
+        Save
+      </Button>
     </div>
   );
 }

@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, WifiOff, RefreshCcw, Printer, Download } from 'lucide-react';
+import { ArrowLeft, WifiOff, RefreshCcw, Printer, Download, Search } from 'lucide-react';
+import { Segmented } from '@/components/ui/segmented';
 import { toast } from 'sonner';
 import { naira } from '@jaypos/shared';
 import { Button } from '@/components/ui/button';
@@ -16,6 +17,7 @@ import { useSyncStore } from '@/store/syncStore';
 import { useUsers } from '@/hooks/useUsers';
 import { ReceiptModal, type ReceiptData } from '@/components/pos/ReceiptModal';
 import { apiClient } from '@/lib/apiClient';
+import { useSettings } from '@/hooks/useSettings';
 import { isAdmin } from '@/lib/roles';
 import { useAuthStore } from '@/store/authStore';
 import { useBranchStore } from '@/store/branchStore';
@@ -84,6 +86,18 @@ function itemsSummary(tx: TransactionRow): string {
     .join(', ');
 }
 
+/** One cell of the summary strip. */
+function Stat({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
+  return (
+    <div className="bg-card px-4 py-3">
+      <p className="text-2xs font-semibold uppercase tracking-wide text-text-muted">{label}</p>
+      <p className={cn('mt-1 font-mono text-xl font-bold tabular-nums', danger ? 'text-danger' : 'text-ink')}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
 const selectClass =
   'h-9 rounded-lg border border-border-strong bg-surface px-3 text-sm text-ink-2 focus:outline-none';
 
@@ -110,20 +124,54 @@ export default function HistoryPage() {
   // them. Admins/managers keep the full store view and the cashier filter.
   const admin = isAdmin(user);
   const cashierScoped = user?.role === 'cashier' && !user?.is_super_admin;
+  const { settings } = useSettings();
+  // Admins/managers can always refund; cashiers only when the store permits it
+  // (matches the backend rule).
+  const canRefund =
+    user?.role === 'admin' ||
+    user?.role === 'manager' ||
+    !!user?.is_super_admin ||
+    (user?.role === 'cashier' && !!settings?.allow_cashier_refund);
 
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [status, setStatus] = useState('');
   const [userId, setUserId] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  type QuickRange = 'today' | '2d' | '7d' | 'all';
+  const [quickRange, setQuickRange] = useState<QuickRange | ''>('all');
   const [page, setPage] = useState(0);
+
+  // Debounce the search box so we don't query on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+  const applyQuickRange = (r: QuickRange) => {
+    setQuickRange(r);
+    const now = new Date();
+    if (r === 'all') {
+      setDateFrom('');
+      setDateTo('');
+    } else {
+      const back = r === 'today' ? 0 : r === '2d' ? 1 : 6;
+      const from = new Date();
+      from.setDate(now.getDate() - back);
+      setDateFrom(isoDay(from));
+      setDateTo(isoDay(now));
+    }
+  };
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
   const [exporting, setExporting] = useState(false);
 
   // Reset to the first page whenever a filter changes.
   useEffect(() => {
     setPage(0);
-  }, [dateFrom, dateTo, paymentMethod, status, userId]);
+  }, [dateFrom, dateTo, paymentMethod, status, userId, search]);
 
   useEffect(() => {
     void refreshPendingCount();
@@ -139,19 +187,37 @@ export default function HistoryPage() {
       paymentMethod: paymentMethod || undefined,
       status: status || undefined,
       userId: effectiveUserId,
+      search: search || undefined,
       includeItems: true,
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     }),
-    [dateFrom, dateTo, paymentMethod, status, effectiveUserId, page]
+    [dateFrom, dateTo, paymentMethod, status, effectiveUserId, search, page]
   );
 
   const { data, isLoading, isError, isFetching, refetch } = useTransactions(filters);
+
+  // Refund totals for the summary strip: a `status=refunded` query over the same
+  // date/payment/cashier scope (ignores the status filter). For a refunded-only
+  // set the server's netSum is `-refundedSum`, and `pagination.total` is the count.
+  const refundsQ = useTransactions({
+    dateFrom: dateFrom || undefined,
+    dateTo: dateTo || undefined,
+    paymentMethod: paymentMethod || undefined,
+    userId: effectiveUserId,
+    search: search || undefined,
+    status: 'refunded',
+    limit: 1,
+  });
+  const refundCount = refundsQ.data?.pagination.total ?? 0;
+  const refundSum = -(refundsQ.data?.netSum ?? 0);
+
   const rows = data?.data ?? [];
   const grandTotal = rows.reduce((sum, tx) => sum + numOr0(tx.total_amount), 0);
   const payTotals = paymentTotals(rows);
   const total = data?.pagination.total ?? 0;
   const pages = data?.pagination.pages ?? 0;
+  const avgTicket = total > 0 ? Math.round((data?.netSum ?? 0) / total) : 0;
   const rangeStart = total === 0 ? 0 : page * PAGE_SIZE + 1;
   const rangeEnd = Math.min((page + 1) * PAGE_SIZE, total);
 
@@ -161,6 +227,8 @@ export default function HistoryPage() {
     setPaymentMethod('');
     setStatus('');
     setUserId('');
+    setSearchInput('');
+    setQuickRange('all');
   };
 
   const handleRefund = async (txId: string) => {
@@ -190,6 +258,7 @@ export default function HistoryPage() {
       if (paymentMethod) params.set('paymentMethod', paymentMethod);
       if (status) params.set('status', status);
       if (effectiveUserId) params.set('userId', effectiveUserId);
+      if (search) params.set('search', search);
       params.set('includeItems', 'true');
 
       const res = await apiClient.get<TransactionHistory>(`/transactions?${params.toString()}`);
@@ -282,11 +351,6 @@ export default function HistoryPage() {
     <div className="flex h-full flex-col gap-4">
       <PageHeader
         title={cashierScoped ? 'My sales' : 'Sales history'}
-        subtitle={
-          online && data
-            ? `${cashierScoped ? 'Your ' : ''}${total} transaction(s) · net ${naira(data.netSum)}`
-            : undefined
-        }
         actions={
           <>
             <Button
@@ -322,22 +386,42 @@ export default function HistoryPage() {
         </div>
       )}
 
+      {/* Summary strip */}
+      {online && data && (
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-card border border-border bg-divider sm:grid-cols-4">
+          <Stat label="Net sales" value={naira(data.netSum)} />
+          <Stat label="Transactions" value={String(total)} />
+          <Stat label="Average ticket" value={naira(avgTicket)} />
+          <Stat
+            label="Refunds"
+            value={`${naira(refundSum)}${refundCount > 0 ? ` · ${refundCount}` : ''}`}
+            danger
+          />
+        </div>
+      )}
+
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
-        <input
-          type="date"
-          aria-label="From date"
-          value={dateFrom}
-          onChange={(e) => setDateFrom(e.target.value)}
-          className={selectClass}
-        />
-        <span className="text-sm text-muted-foreground">to</span>
-        <input
-          type="date"
-          aria-label="To date"
-          value={dateTo}
-          onChange={(e) => setDateTo(e.target.value)}
-          className={selectClass}
+        <div className="relative w-40">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+          <input
+            aria-label="Search sales"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Receipt no., customer or cashier"
+            className="h-9 w-full rounded-lg border border-border-strong bg-surface pl-9 pr-3 text-sm text-ink-2 focus:outline-none"
+          />
+        </div>
+        <Segmented
+          size="sm"
+          value={quickRange as QuickRange}
+          onChange={applyQuickRange}
+          options={[
+            { value: 'today', label: 'Today' },
+            { value: '2d', label: '2 days' },
+            { value: '7d', label: '7 days' },
+            { value: 'all', label: 'All' },
+          ]}
         />
         <select
           aria-label="Payment method"
@@ -378,7 +462,28 @@ export default function HistoryPage() {
             ))}
           </select>
         )}
-        {(dateFrom || dateTo || paymentMethod || status || (!cashierScoped && userId)) && (
+        <input
+          type="date"
+          aria-label="From date"
+          value={dateFrom}
+          onChange={(e) => {
+            setDateFrom(e.target.value);
+            setQuickRange('');
+          }}
+          className={cn(selectClass, 'w-36')}
+        />
+        <span className="text-sm text-text-muted">to</span>
+        <input
+          type="date"
+          aria-label="To date"
+          value={dateTo}
+          onChange={(e) => {
+            setDateTo(e.target.value);
+            setQuickRange('');
+          }}
+          className={cn(selectClass, 'w-36')}
+        />
+        {(dateFrom || dateTo || paymentMethod || status || searchInput || (!cashierScoped && userId)) && (
           <Button variant="ghost" size="sm" onClick={resetFilters}>
             Reset
           </Button>
@@ -434,7 +539,7 @@ export default function HistoryPage() {
                   </td>
                   <td className="px-4 py-2">
                     <div className="flex flex-col">
-                      <span className="font-mono text-xs text-ink-2">{tx.receipt_number || tx.id.slice(0, 8)}</span>
+                      <span className="font-mono text-[10px] leading-tight text-ink-2">{tx.receipt_number || tx.id.slice(0, 8)}</span>
                       <span className="text-xs text-text-muted">{tx.user?.first_name || 'Unknown'}</span>
                     </div>
                   </td>
@@ -462,7 +567,7 @@ export default function HistoryPage() {
                   </td>
                   <td className="px-4 py-2">
                     <div className="flex items-center justify-center gap-1">
-                      {admin && (
+                      {canRefund && (
                         <Button
                           variant="ghost"
                           size="sm"

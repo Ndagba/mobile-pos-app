@@ -6,6 +6,7 @@ import { Search, CornerDownLeft, type LucideIcon } from 'lucide-react';
 import { useUiStore } from '@/store/uiStore';
 import { useAuthStore } from '@/store/authStore';
 import { useSyncStore } from '@/store/syncStore';
+import { useSettings } from '@/hooks/useSettings';
 import { visibleNavItems } from './nav';
 import { cn } from '@/lib/utils';
 
@@ -26,20 +27,21 @@ export function CommandMenu() {
   const setOpen = useUiStore((s) => s.setCommandOpen);
   const user = useAuthStore((s) => s.user);
   const syncNow = useSyncStore((s) => s.syncNow);
+  const { settings } = useSettings();
 
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const entries = useMemo<CommandEntry[]>(() => {
-    const nav: CommandEntry[] = visibleNavItems(user).map((i) => ({
+    const nav: CommandEntry[] = visibleNavItems(user, settings).map((i) => ({
       label: i.label,
       hint: i.shortcut,
       icon: i.icon,
       run: () => router.push(i.href)
     }));
     return nav;
-  }, [user, router]);
+  }, [user, settings, router]);
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();

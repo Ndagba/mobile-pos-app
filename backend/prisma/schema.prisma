@@ -386,6 +386,18 @@ model StoreSetting {
   allow_cashier_edit_customers Boolean  @default(true)
   customer_menu_enabled        Boolean  @default(true)
   supplier_menu_enabled        Boolean  @default(true)
+  // Store profile (printed on receipts)
+  business_name                String?
+  rc_number                    String?
+  store_address                String?
+  // Tax + receipt
+  tax_rate                     Decimal? @db.Decimal(5, 2)
+  receipt_footer               String?
+  receipt_show_logo            Boolean  @default(true)
+  // Additional cashier permissions
+  allow_cashier_refund         Boolean  @default(false)
+  allow_cashier_discount       Boolean  @default(true)
+  max_discount_percent         Int?
   created_at                   DateTime @default(now())
   updated_at                   DateTime @updatedAt
 }

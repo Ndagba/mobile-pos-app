@@ -18,7 +18,8 @@ import { useAuthStore } from '@/store/authStore';
 import { usePrefsStore } from '@/store/prefsStore';
 import { useLowStock } from '@/hooks/useLowStock';
 import { canManageInventory } from '@/lib/roles';
-import { NAV_GROUPS, activeNavHref, type NavItem } from './nav';
+import { useSettings } from '@/hooks/useSettings';
+import { NAV_GROUPS, activeNavHref, navItemAllowed, type NavItem } from './nav';
 
 function initials(name?: string, email?: string): string {
   const src = (name || email || '?').trim();
@@ -38,6 +39,9 @@ export function Sidebar() {
   const toggleHideAmounts = usePrefsStore((s) => s.toggleHideAmounts);
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // Store settings gate the Customer/Supplier menus for cashiers.
+  const { settings } = useSettings();
+
   // Low-stock count badge on the Inventory nav item (admin/manager only).
   const { data: lowStock } = useLowStock();
   const lowCount = canManageInventory(user) ? lowStock?.length ?? 0 : 0;
@@ -50,7 +54,7 @@ export function Sidebar() {
   };
 
   const renderItem = (item: NavItem) => {
-    if (item.visible && !item.visible(user)) return null;
+    if (!navItemAllowed(item, user, settings)) return null;
     const isActive = item.href === active;
     const badge = item.href === '/inventory' && lowCount > 0 ? lowCount : null;
 
@@ -118,7 +122,7 @@ export function Sidebar() {
       {/* Nav groups */}
       <nav className="flex-1 overflow-y-auto px-3 pb-2">
         {NAV_GROUPS.map((group) => {
-          const items = group.items.filter((i) => !i.visible || i.visible(user));
+          const items = group.items.filter((i) => navItemAllowed(i, user, settings));
           if (items.length === 0) return null;
           return (
             <div key={group.label} className="mb-1 mt-3 first:mt-1">
@@ -141,7 +145,10 @@ export function Sidebar() {
             <div className="absolute bottom-[64px] left-3 right-3 z-40 overflow-hidden rounded-lg border border-border bg-popover shadow-modal">
               <button
                 type="button"
-                onClick={() => setMenuOpen(false)}
+                onClick={() => {
+                  setMenuOpen(false);
+                  router.push('/profile');
+                }}
                 className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-ink-2 hover:bg-surface-subtle"
               >
                 <UserIcon className="h-4 w-4 text-text-muted" /> Profile

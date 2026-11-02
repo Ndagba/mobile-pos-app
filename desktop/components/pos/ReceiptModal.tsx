@@ -4,6 +4,7 @@ import { Printer } from 'lucide-react';
 import { naira } from '@jaypos/shared';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
+import { useSettings } from '@/hooks/useSettings';
 import { cn } from '@/lib/utils';
 
 export interface ReceiptLine {
@@ -56,8 +57,16 @@ function Row({ label, value, bold }: { label: string; value: string; bold?: bool
  * its client transaction id and a "will sync" note (mobile parity).
  */
 export function ReceiptModal({ data, onClose }: { data: ReceiptData | null; onClose: () => void }) {
+  const { settings } = useSettings();
   if (!data) return null;
   const synced = data.status === 'completed';
+
+  // Store-configurable receipt content (falls back to the sale's captured values).
+  const storeName = settings?.business_name?.trim() || data.storeLabel;
+  const vatPct = settings?.tax_rate != null && settings.tax_rate !== '' ? Number(settings.tax_rate) : 7.5;
+  const vatLabel = Number.isFinite(vatPct) ? `VAT ${vatPct}%` : 'VAT';
+  const footerText = settings?.receipt_footer?.trim() || data.footer;
+  const showLogo = settings?.receipt_show_logo ?? true;
 
   return (
     <Modal open onClose={onClose} title="Receipt">
@@ -79,8 +88,11 @@ export function ReceiptModal({ data, onClose }: { data: ReceiptData | null; onCl
             className="rounded-lg border border-divider bg-surface-subtle p-4 font-mono text-xs leading-relaxed text-ink-2"
           >
             <div className="text-center">
-              <p className="text-sm font-semibold text-ink">{data.storeLabel}</p>
+              {showLogo && <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">JayPOS</p>}
+              <p className="text-sm font-semibold text-ink">{storeName}</p>
               <p className="text-text-muted">{data.branchLabel}</p>
+              {settings?.rc_number && <p className="text-text-muted">{settings.rc_number}</p>}
+              {settings?.store_address && <p className="text-text-muted">{settings.store_address}</p>}
             </div>
 
             <div className="my-2 border-t border-dashed border-border-strong" />
@@ -111,14 +123,14 @@ export function ReceiptModal({ data, onClose }: { data: ReceiptData | null; onCl
 
             <div className="my-2 border-t border-dashed border-border-strong" />
             <Row label="Subtotal" value={naira(data.subtotal)} />
-            <Row label="VAT" value={naira(data.tax_amount)} />
+            <Row label={vatLabel} value={naira(data.tax_amount)} />
             {data.discount_amount > 0 && (
               <Row label="Discount" value={`- ${naira(data.discount_amount)}`} />
             )}
             <Row label="TOTAL" value={naira(data.total)} bold />
 
             <div className="my-2 border-t border-dashed border-border-strong" />
-            <p className="text-center text-text-muted">{data.footer}</p>
+            <p className="text-center text-text-muted">{footerText}</p>
           </div>
         </div>
 

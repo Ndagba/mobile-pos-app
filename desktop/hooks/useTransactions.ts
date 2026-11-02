@@ -40,6 +40,8 @@ export interface TransactionFilters {
   paymentMethod?: string;
   status?: string;
   userId?: string;
+  /** Free-text match on receipt number, customer name or cashier name. */
+  search?: string;
   limit?: number;
   offset?: number;
   /** Include each sale's line items (product names) in the response. */
@@ -69,6 +71,7 @@ async function fetchTransactions(f: TransactionFilters): Promise<TransactionHist
   if (f.paymentMethod) params.set('paymentMethod', f.paymentMethod);
   if (f.status) params.set('status', f.status);
   if (f.userId) params.set('userId', f.userId);
+  if (f.search) params.set('search', f.search);
   if (f.includeItems) params.set('includeItems', 'true');
 
   // The list endpoint is double-nested (`data.data`); apiClient unwraps exactly

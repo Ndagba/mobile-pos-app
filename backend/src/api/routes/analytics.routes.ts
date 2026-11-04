@@ -41,8 +41,10 @@ router.get(
     const isCashier = role === 'cashier';
     const userSql = isCashier ? Prisma.sql`AND t.user_id = ${userId}` : Prisma.empty;
 
-    // Determine effective branch IDs
-    const branchIds = await getAuthorizedBranchIds(req);
+    // Determine effective branch IDs. An admin/manager may narrow to one branch
+    // via `branch_id` (clamped to the branches they're authorized for); a cashier
+    // stays on their home branch regardless.
+    const branchIds = resolveBranchIds(req, await getAuthorizedBranchIds(req));
 
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);

@@ -17,7 +17,9 @@ import {
 import { apiClient } from '@/lib/apiClient';
 import { naira } from '@jaypos/shared';
 import { useAuthStore } from '@/store/authStore';
+import { useBranchStore } from '@/store/branchStore';
 import { usePrefsStore } from '@/store/prefsStore';
+import { useBranches } from '@/hooks/useBranches';
 import { useLowStock } from '@/hooks/useLowStock';
 import type { SalesReportData } from '@/hooks/useAnalytics';
 import { DashboardData } from '@/types/analytics';
@@ -56,14 +58,21 @@ export default function DashboardPage() {
   const isCashier = role === 'cashier';
   const isManager = role === 'manager';
 
+  // Active branch from the top-bar selector. Admins/managers can switch branches
+  // here (cashiers are pinned to their own). It's passed to every query so the
+  // dashboard reflects the chosen branch; the backend still clamps it to the
+  // user's authorized branches, so this can never widen scope.
+  const branchId = useBranchStore((s) => s.selectedBranchId) || '';
+  const branchQ = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : '';
+  const branches = useBranches().data ?? [];
+
   const money = (n: number) => (hideAmounts ? '₦ ••••••' : naira(n));
 
-  // Dashboard figures. The backend scopes this by role already: a cashier sees
-  // only their own sales (user_id), a manager only their assigned branches, an
-  // admin the whole store — so no extra client scoping is needed here.
+  // Dashboard figures. The backend also scopes by role: a cashier sees only their
+  // own sales (user_id); branch_id is clamped to the user's authorized branches.
   const { data, isLoading } = useQuery({
-    queryKey: ['dashboard', range],
-    queryFn: () => apiClient.get<DashboardData>('/analytics/dashboard'),
+    queryKey: ['dashboard', range, branchId],
+    queryFn: () => apiClient.get<DashboardData>(`/analytics/dashboard${branchQ}`),
   });
 
   // 14-day daily series for the Sales-performance chart (this week vs last week).
@@ -78,14 +87,14 @@ export default function DashboardPage() {
   }, []);
 
   const salesQ = useQuery({
-    queryKey: ['dashboard-sales-14', window14.from, window14.to],
+    queryKey: ['dashboard-sales-14', window14.from, window14.to, branchId],
     queryFn: () =>
       apiClient.get<SalesReportData>(
-        `/analytics/sales?dateFrom=${encodeURIComponent(window14.from)}&dateTo=${encodeURIComponent(window14.to)}`
+        `/analytics/sales?dateFrom=${encodeURIComponent(window14.from)}&dateTo=${encodeURIComponent(window14.to)}${branchId ? `&branch_id=${encodeURIComponent(branchId)}` : ''}`
       ),
   });
 
-  const lowStockQ = useLowStock({});
+  const lowStockQ = useLowStock({ branchId: branchId || undefined });
 
   const series = React.useMemo(() => {
     const byDay = new Map<string, number>();
@@ -161,11 +170,10 @@ export default function DashboardPage() {
   const maxRev = Math.max(1, ...topProducts.map((p) => p.total_revenue));
   const lowStock = (lowStockQ.data ?? []).slice(0, 6);
 
+  const branchName = branchId ? branches.find((b) => b.id === branchId)?.name : undefined;
   const scopeNote = isCashier
-    ? 'Your sales activity'
-    : isManager
-      ? 'Your branch'
-      : 'All branches';
+    ? branchName ?? 'Your sales activity'
+    : branchName ?? (isManager ? 'Your branches' : 'All branches');
 
   return (
     <div className="space-y-5">

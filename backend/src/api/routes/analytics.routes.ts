@@ -16,6 +16,20 @@ const branchWhere = (branchIds: string[], storeId: string | null): Record<string
   };
 };
 
+/**
+ * Narrow the user's authorized branch set to a single requested `branch_id` when
+ * it is one they may access; otherwise keep the full set. This lets the reports
+ * branch dropdown filter without ever widening a user's authorized scope.
+ */
+const resolveBranchIds = (req: Request, authorized: string[]): string[] => {
+  const requested = req.query.branch_id;
+  const id = typeof requested === 'string' ? requested : undefined;
+  if (id && id !== 'null' && id !== 'undefined' && authorized.includes(id)) {
+    return [id];
+  }
+  return authorized;
+};
+
 // ─── Dashboard ────────────────────────────────────────────────
 router.get(
   '/dashboard',
@@ -149,6 +163,7 @@ router.get(
       where: isCashier ? { ...locationFilter, user_id: userId } : locationFilter,
       include: {
         user: { select: { first_name: true } },
+        customer: { select: { first_name: true, last_name: true } },
         _count: { select: { transaction_items: true } }
       },
       orderBy: { created_at: 'desc' },
@@ -242,11 +257,15 @@ router.get(
         })),
         recent_transactions: recentTransactions.map(t => ({
           id:             t.id,
+          receipt_number: t.receipt_number ?? null,
           total_amount:   Number(t.total_amount),
           payment_method: t.payment_method,
           status:         t.status,
           created_at:     t.created_at,
           cashier:        t.user?.first_name ?? 'Unknown',
+          customer:       t.customer
+            ? `${t.customer.first_name ?? ''} ${t.customer.last_name ?? ''}`.trim() || null
+            : null,
           item_count:     t._count?.transaction_items ?? 0
         }))
       }
@@ -302,7 +321,13 @@ router.get(
 
     const user = (req as any).user;
     const storeId: string | null = user?.storeId ?? null;
-    const branchIds = await getAuthorizedBranchIds(req);
+    const branchIds = resolveBranchIds(req, await getAuthorizedBranchIds(req));
+
+    // A cashier only ever sees their own sales — mirror the dashboard's scoping so
+    // the Sales-performance chart reflects the cashier's activity, not the branch's.
+    const role: string = user?.role ?? '';
+    const userId: string = user?.userId ?? user?.id ?? '';
+    const userSql = role === 'cashier' ? Prisma.sql`AND t.user_id = ${userId}` : Prisma.empty;
 
     // Optional item-type filter (PRODUCT | SERVICE); absent/other value = both types.
     // Whitelisted to a fixed set and passed as a bound param (never string-interpolated).
@@ -335,6 +360,7 @@ router.get(
         AND t.created_at >= ${from}
         AND t.created_at <= ${to}
         AND t.branch_id = ANY(${branchIds})
+        ${userSql}
         ${itemTypeClause}
       GROUP BY DATE(t.created_at)
       ORDER BY date ASC
@@ -363,7 +389,7 @@ router.get(
     const { period = 'daily', limit = '10' } = req.query;
     const user = (req as any).user;
     const storeId: string | null = user?.storeId ?? null;
-    const branchIds = await getAuthorizedBranchIds(req);
+    const branchIds = resolveBranchIds(req, await getAuthorizedBranchIds(req));
 
     const dateFrom = new Date();
     switch (period) {
@@ -424,7 +450,7 @@ router.get(
     const { dateFrom, dateTo } = req.query;
     const user = (req as any).user;
     const storeId: string | null = user?.storeId ?? null;
-    const branchIds = await getAuthorizedBranchIds(req);
+    const branchIds = resolveBranchIds(req, await getAuthorizedBranchIds(req));
 
     const from = dateFrom
       ? new Date(dateFrom as string)
@@ -571,7 +597,7 @@ router.get(
     const { dateFrom, dateTo } = req.query;
     const user = (req as any).user;
     const storeId: string | null = user?.storeId ?? null;
-    const branchIds = await getAuthorizedBranchIds(req);
+    const branchIds = resolveBranchIds(req, await getAuthorizedBranchIds(req));
 
     const from = dateFrom ? new Date(dateFrom as string) : new Date(0);
     const to = dateTo ? new Date(dateTo as string) : new Date();

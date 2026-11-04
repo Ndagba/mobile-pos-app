@@ -127,7 +127,7 @@ export default function UsersPage() {
 
         {/* Permission matrix */}
         <Card className="overflow-hidden">
-          <div className="grid grid-cols-[1fr_repeat(3,auto)] gap-x-4 border-b border-divider bg-surface-subtle px-4 py-2.5 text-2xs font-bold uppercase tracking-wide text-text-muted">
+          <div className="grid grid-cols-[1fr_repeat(3,80px)] gap-x-4 border-b border-divider bg-surface-subtle px-4 py-2.5 text-2xs font-bold uppercase tracking-wide text-text-muted">
             <span>Permission</span>
             <span className="text-center">Cashier</span>
             <span className="text-center">Manager</span>
@@ -135,7 +135,7 @@ export default function UsersPage() {
           </div>
           <div className="divide-y divide-divider">
             {MATRIX.map((row) => (
-              <div key={row.label} className="grid grid-cols-[1fr_repeat(3,auto)] items-center gap-x-4 px-4 py-2.5 text-sm">
+              <div key={row.label} className="grid grid-cols-[1fr_repeat(3,80px)] items-center gap-x-4 px-4 py-2.5 text-sm">
                 <span className="text-ink-2">{row.label}</span>
                 <Cell on={row.cashier} />
                 <Cell on={row.manager} />

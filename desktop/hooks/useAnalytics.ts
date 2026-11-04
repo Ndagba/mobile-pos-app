@@ -89,7 +89,8 @@ export function useAnalytics() {
       useQuery({
         queryKey: ['analytics-sales', branchId, dateFrom, dateTo],
         queryFn: async () => {
-          const params = new URLSearchParams({ branchId, dateFrom, dateTo });
+          const params = new URLSearchParams({ dateFrom, dateTo });
+          if (branchId) params.set('branch_id', branchId);
           return await apiClient.get<SalesReportData>(`/analytics/sales?${params.toString()}`);
         },
       }),
@@ -98,7 +99,8 @@ export function useAnalytics() {
       useQuery({
         queryKey: ['analytics-top-products', branchId, period],
         queryFn: async () => {
-          const params = new URLSearchParams({ branchId, period });
+          const params = new URLSearchParams({ period });
+          if (branchId) params.set('branch_id', branchId);
           return await apiClient.get<ProductPerformanceData>(`/analytics/top-products?${params.toString()}`);
         },
       }),

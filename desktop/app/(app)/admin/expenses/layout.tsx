@@ -1,15 +1,10 @@
 import React from 'react';
 
+/**
+ * Pass-through layout for the expenses section. Each page owns its header and
+ * spacing (and the app shell supplies the page padding), so this no longer adds a
+ * section title — that only duplicated the per-page headers.
+ */
 export default function ExpenseLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Expense Management</h1>
-          <p className="text-muted-foreground">Track and organize business expenditures.</p>
-        </div>
-      </div>
-      {children}
-    </div>
-  );
+  return <>{children}</>;
 }

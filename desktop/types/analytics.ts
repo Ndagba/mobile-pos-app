@@ -23,10 +23,12 @@ export interface DashboardData {
   }>;
   recent_transactions: Array<{
     id: string;
+    receipt_number?: string | null;
     total_amount: number;
     payment_method: string;
     status: string;
     item_count: number;
     cashier: string;
+    customer?: string | null;
   }>;
 }

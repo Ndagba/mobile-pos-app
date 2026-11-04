@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { ScanBarcode } from 'lucide-react';
 import type { Product, Category, Location } from '@jaypos/shared';
 import type { Branch } from '@/hooks/useBranches';
 import { Modal } from '@/components/ui/modal';
+import { ScanModal } from '@/components/pos/ScanModal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -62,6 +64,7 @@ export function ProductFormModal({
   const [name, setName] = useState('');
   const [sku, setSku] = useState('');
   const [barcode, setBarcode] = useState('');
+  const [scanOpen, setScanOpen] = useState(false);
   const [description, setDescription] = useState('');
   const [itemType, setItemType] = useState<'PRODUCT' | 'SERVICE'>('PRODUCT');
   const [markedPrice, setMarkedPrice] = useState('');
@@ -280,9 +283,34 @@ export function ProductFormModal({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="pf-barcode">Barcode</Label>
-            <Input id="pf-barcode" value={barcode} onChange={(e) => setBarcode(e.target.value)} />
+            <div className="relative">
+              <Input
+                id="pf-barcode"
+                value={barcode}
+                onChange={(e) => setBarcode(e.target.value)}
+                className="pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setScanOpen(true)}
+                aria-label="Scan barcode with camera"
+                title="Scan with camera"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-text-muted transition-colors hover:bg-surface-subtle hover:text-ink"
+              >
+                <ScanBarcode className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </div>
+
+        <ScanModal
+          open={scanOpen}
+          onClose={() => setScanOpen(false)}
+          onScan={(code) => {
+            setBarcode(code.trim());
+            setScanOpen(false);
+          }}
+        />
 
         {/* Category */}
         <div className="space-y-1.5">

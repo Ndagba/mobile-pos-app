@@ -3,6 +3,8 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-nati
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSelector } from 'react-redux';
+import { RootState } from '../redux/store';
 import { C } from '../theme';
 
 interface AdminMenuItemProps {
@@ -31,6 +33,8 @@ function AdminMenuItem({ icon, title, description, onPress, color = C.accent }: 
 export default function AdminScreen() {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
+  const user = useSelector((s: RootState) => s.auth.user);
+  const isAdmin = user?.role === 'admin';
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -58,6 +62,19 @@ export default function AdminScreen() {
           onPress={() => navigation.navigate('CashShifts')}
         />
         
+        {isAdmin && (
+          <>
+            <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Financials</Text>
+            <AdminMenuItem
+              icon="cash-multiple"
+              title="Expenses"
+              description="Record running costs, manage categories, and review spending"
+              color="#E11D6B"
+              onPress={() => navigation.navigate('Expenses')}
+            />
+          </>
+        )}
+
         <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Reports & Logs</Text>
         <AdminMenuItem
           icon="file-document-outline"

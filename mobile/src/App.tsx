@@ -102,6 +102,7 @@ import StockCountsScreen from './screens/StockCountsScreen';
 import CashShiftsScreen from './screens/CashShiftsScreen';
 import EODReportsScreen from './screens/EODReportsScreen';
 import AuditLogsScreen from './screens/AuditLogsScreen';
+import ExpensesScreen from './screens/ExpensesScreen';
 
 const Tab   = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -186,6 +187,8 @@ function TabletNavigationRoot() {
         <Stack.Screen name="CashShifts" component={CashShiftsScreen} />
         <Stack.Screen name="EODReports" component={EODReportsScreen} />
         <Stack.Screen name="AuditLogs" component={AuditLogsScreen} />
+        {/* Admin only: gating is enforced at the screen entry point */}
+        <Stack.Screen name="Expenses" component={ExpensesScreen} />
         {/* Super-admin only: gating is enforced at the screen entry point */}
         <Stack.Screen name="AdminSubscriptions" component={AdminSubscriptionsScreen} />
       </Stack.Group>
@@ -411,6 +414,7 @@ function AuthenticatedRoot() {
       <Stack.Screen name="CashShifts" component={CashShiftsScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="EODReports" component={EODReportsScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="AuditLogs" component={AuditLogsScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="Expenses" component={ExpensesScreen} options={{ presentation: 'modal' }} />
       {/* Super-admin only: gating is enforced at the screen entry point */}
       <Stack.Screen
         name="AdminSubscriptions"

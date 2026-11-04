@@ -452,6 +452,12 @@ export default function CheckoutScreen() {
                     <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', minHeight: 50 }}>
                       <View style={{ flex: 1 }}>
                         <Text style={[s.prodName, { fontSize: fontSize.base }]} numberOfLines={2}>{item.name}</Text>
+                        {!isService && item.location?.name && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 3 }}>
+                            <MaterialCommunityIcons name="map-marker-outline" size={11} color={C.muted} />
+                            <Text style={{ fontSize: 11, color: C.muted }} numberOfLines={1}>{item.location.name}</Text>
+                          </View>
+                        )}
                         <Text style={{ fontSize: 11, color: stock > 0 ? C.muted : '#FB7185', fontWeight: stock > 0 ? 'normal' : '700', marginTop: 4 }}>
                           {isService ? 'Service' : stock > 0 ? `Stock: ${stock}` : 'Out of Stock'}
                         </Text>
@@ -884,6 +890,12 @@ export default function CheckoutScreen() {
                   <View style={{ flex: 1 }}>
                     {/* Product name */}
                     <Text style={s.prodName} numberOfLines={2}>{item.name}</Text>
+                    {!isService && item.location?.name && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 3 }}>
+                        <MaterialCommunityIcons name="map-marker-outline" size={11} color={C.muted} />
+                        <Text style={{ fontSize: 11, color: C.muted }} numberOfLines={1}>{item.location.name}</Text>
+                      </View>
+                    )}
                     <Text style={{ fontSize: 11, color: stock > 0 ? C.muted : '#FB7185', fontWeight: stock > 0 ? 'normal' : '700', marginTop: 4 }}>
                       {isService ? 'Service' : stock > 0 ? `Stock: ${stock}` : 'Out of Stock'}
                     </Text>

@@ -23,14 +23,17 @@ import { useResponsive, responsiveSpacing, responsiveFontSize, responsiveGridCol
 import * as ImagePicker from 'expo-image-picker';
 
 // ─── Types ────────────────────────────────────────────────────
-type TabKey = 'all' | 'products' | 'services' | 'categories' | 'low-stock';
+type TabKey = 'all' | 'products' | 'services' | 'categories' | 'locations' | 'low-stock';
 
 interface Branch { id: string; name: string; is_active: boolean; }
 interface Category { id: string; name: string; description?: string; branch_id?: string; }
+// Physical shop storage location (e.g. Shelf A1, Rack 1, Refrigerator).
+interface Location { id: string; name: string; description?: string; branch_id?: string; _count?: { products: number }; }
 interface Product {
   id: string; name: string; sku: string; barcode?: string | null;
   marked_price: number; effective_price: number; cost_price?: number;
   tax_rate: number; category_id?: string; category?: Category;
+  location_id?: string | null; location?: { id: string; name: string } | null;
   item_type?: 'PRODUCT' | 'SERVICE';
   description?: string; branch_id?: string; unit?: string;
   inventory?: { quantity_on_hand: number; low_stock_threshold: number };
@@ -78,12 +81,13 @@ function SparkBars({ data, color, height = 36 }: { data: number[]; color: string
 
 const EMPTY_PRODUCT = {
   name: '', sku: '', barcode: '', marked_price: '', effective_price: '',
-  cost_price: '', tax_rate: '7.5', category_id: '',
+  cost_price: '', tax_rate: '7.5', category_id: '', location_id: '',
   quantity: '', description: '', low_stock_threshold: '10',
   branch_id: '', unit: 'piece', image_url: '',
   item_type: 'PRODUCT',
 };
 const EMPTY_CATEGORY = { name: '', description: '', branch_id: '' };
+const EMPTY_LOCATION = { name: '', description: '', branch_id: '' };
 
 // AsyncStorage key for an in-progress "New Product" draft.
 const PRODUCT_DRAFT_KEY = '@pos_product_draft';
@@ -137,6 +141,66 @@ function CategoryDropdown({
   );
 }
 
+// ─── Location Dropdown ────────────────────────────────────────
+// Mirrors CategoryDropdown but the selection is optional: a "No location"
+// row clears the assignment, and the footer creates a new location.
+function LocationDropdown({
+  locations, value, onChange, onAddNew,
+}: {
+  locations: Location[]; value: string;
+  onChange: (id: string) => void; onAddNew: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = locations.find(l => l.id === value);
+
+  return (
+    <>
+      <TouchableOpacity style={styles.dropdown} onPress={() => setOpen(true)}>
+        <Text style={[styles.dropdownText, !selected && styles.dropdownPlaceholder]}>
+          {selected ? selected.name : 'No location assigned'}
+        </Text>
+        <MaterialCommunityIcons name="chevron-down" size={20} color={C.muted} />
+      </TouchableOpacity>
+
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <TouchableOpacity style={styles.dropdownOverlay} activeOpacity={1} onPress={() => setOpen(false)}>
+          <View style={styles.dropdownSheet}>
+            <Text style={styles.dropdownSheetTitle}>Select Location</Text>
+            <ScrollView style={{ maxHeight: 300 }}>
+              <TouchableOpacity
+                style={[styles.dropdownItem, !value && styles.dropdownItemSelected]}
+                onPress={() => { onChange(''); setOpen(false); }}
+              >
+                <Text style={{ color: !value ? C.accent : C.muted, fontWeight: !value ? '700' : '400' }}>
+                  No location
+                </Text>
+                {!value && <MaterialCommunityIcons name="check" size={18} color={C.accent} />}
+              </TouchableOpacity>
+              {locations.map(loc => (
+                <TouchableOpacity
+                  key={loc.id}
+                  style={[styles.dropdownItem, value === loc.id && styles.dropdownItemSelected]}
+                  onPress={() => { onChange(loc.id); setOpen(false); }}
+                >
+                  <Text style={{ color: value === loc.id ? C.accent : C.ink, fontWeight: value === loc.id ? '700' : '400' }}>
+                    {loc.name}
+                  </Text>
+                  {value === loc.id && <MaterialCommunityIcons name="check" size={18} color={C.accent} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <Divider />
+            <TouchableOpacity style={styles.dropdownItem} onPress={() => { setOpen(false); onAddNew(); }}>
+              <MaterialCommunityIcons name="plus" size={18} color={C.accent} />
+              <Text style={{ color: C.accent, marginLeft: 6, fontWeight: '600' }}>Create new location</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </>
+  );
+}
+
 // ─── Main Screen ──────────────────────────────────────────────
 export default function InventoryScreen() {
   const insets = useSafeAreaInsets();
@@ -156,7 +220,9 @@ export default function InventoryScreen() {
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
   const [filterCategoryId, setFilterCategoryId] = useState<string | null>(null);
+  const [filterLocationId, setFilterLocationId] = useState<string | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
   const selectedBranchRef = useRef<string | null>(null);
@@ -180,8 +246,10 @@ export default function InventoryScreen() {
   const [showProductForm, setShowProductForm] = useState(false);
   const [barcodeScannerOpen, setBarcodeScannerOpen] = useState(false);
   const [showCategoryForm, setShowCategoryForm] = useState(false);
+  const [showLocationForm, setShowLocationForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [editingLocation, setEditingLocation] = useState<Location | null>(null);
   const [showStockAdjust, setShowStockAdjust] = useState(false);
   const [stockProduct, setStockProduct] = useState<Product | null>(null);
   const [stockDelta, setStockDelta] = useState('');
@@ -195,6 +263,7 @@ export default function InventoryScreen() {
   // Forms
   const [productForm, setProductForm] = useState(EMPTY_PRODUCT);
   const [categoryForm, setCategoryForm] = useState(EMPTY_CATEGORY);
+  const [locationForm, setLocationForm] = useState(EMPTY_LOCATION);
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
 
@@ -250,6 +319,7 @@ export default function InventoryScreen() {
       await Promise.all([
         loadProducts(selectedBranchRef.current),
         loadCategories(selectedBranchRef.current),
+        loadLocations(selectedBranchRef.current),
         loadLowStock(selectedBranchRef.current),
       ]);
       setLoading(false);
@@ -289,6 +359,15 @@ export default function InventoryScreen() {
     } catch {}
   };
 
+  const loadLocations = async (branchId?: string | null) => {
+    try {
+      const branchParam = branchId
+        ? `?branch_id=${encodeURIComponent(branchId)}` : '';
+      const res: any = await ApiClient.get(`/locations${branchParam}`);
+      setLocations(Array.isArray(res) ? res : res?.data ?? []);
+    } catch {}
+  };
+
   const loadLowStock = async (branchId?: string | null) => {
     try {
       const branchParam = branchId
@@ -300,7 +379,7 @@ export default function InventoryScreen() {
 
   const loadAll = async (branchId: string | null = selectedBranchRef.current) => {
     setLoading(true);
-    await Promise.all([loadProducts(branchId), loadCategories(branchId), loadLowStock(branchId)]);
+    await Promise.all([loadProducts(branchId), loadCategories(branchId), loadLocations(branchId), loadLowStock(branchId)]);
     setLoading(false);
   };
 
@@ -400,7 +479,93 @@ export default function InventoryScreen() {
   };
 
   const handleViewCategoryProducts = (cat: Category) => {
+    setFilterLocationId(null);
     setFilterCategoryId(cat.id);
+    setActiveTab('products');
+  };
+
+  // ─── Location CRUD ────────────────────────────────────────
+  const openNewLocation = () => {
+    setEditingLocation(null);
+    const defaultBranchId = selectedBranchRef.current || (branches.length === 1 ? branches[0].id : '');
+    setLocationForm({ ...EMPTY_LOCATION, branch_id: defaultBranchId });
+    setShowLocationForm(true);
+  };
+
+  const openEditLocation = (loc: Location) => {
+    setEditingLocation(loc);
+    setLocationForm({
+      name: loc.name,
+      description: loc.description ?? '',
+      branch_id: loc.branch_id ?? '',
+    });
+    setShowLocationForm(true);
+  };
+
+  const handleSaveLocation = async () => {
+    if (!locationForm.name.trim()) { Alert.alert('Validation', 'Name is required'); return; }
+    let finalBranchId = locationForm.branch_id;
+    if (!finalBranchId && branches.length === 1) {
+      finalBranchId = branches[0].id;
+    }
+    if (!editingLocation && isAdmin && !finalBranchId) {
+      Alert.alert(
+        'Branch Required',
+        'Select a specific branch using the filter chips above, then try creating a location again.'
+      );
+      return;
+    }
+    setSaving(true);
+    try {
+      if (editingLocation) {
+        await ApiClient.patch(`/locations/${editingLocation.id}`, {
+          name: locationForm.name.trim(),
+          description: locationForm.description.trim() || undefined,
+        });
+        Alert.alert('Updated', `"${locationForm.name}" updated`);
+      } else {
+        await ApiClient.post('/locations', {
+          name: locationForm.name.trim(),
+          description: locationForm.description.trim() || undefined,
+          ...(finalBranchId && { branch_id: finalBranchId }),
+        });
+        Alert.alert('Created', `"${locationForm.name}" created`);
+      }
+      setShowLocationForm(false);
+      loadLocations(selectedBranchRef.current);
+    } catch (e: any) {
+      Alert.alert('Error', apiError(e));
+    } finally { setSaving(false); }
+  };
+
+  // Delete is admin-only in the UI (managers create/edit), matching desktop.
+  // The backend blocks deletion while products are still assigned (400) — that
+  // message is surfaced verbatim to the user.
+  const handleDeleteLocation = (loc: Location) => {
+    Alert.alert(
+      'Delete Location',
+      `Delete "${loc.name}"? Products assigned here must be reassigned first.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete', style: 'destructive',
+          onPress: async () => {
+            try {
+              await (ApiClient as any).delete(`/locations/${loc.id}`);
+              if (filterLocationId === loc.id) setFilterLocationId(null);
+              loadLocations(selectedBranchRef.current);
+            } catch (e: any) {
+              Alert.alert('Error', apiError(e));
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleViewLocationProducts = (loc: Location) => {
+    setFilterCategoryId(null);
+    setFilterLocationId(loc.id);
     setActiveTab('products');
   };
 
@@ -468,6 +633,7 @@ export default function InventoryScreen() {
       cost_price: p.cost_price != null ? String(p.cost_price) : '',
       tax_rate: String(p.tax_rate ?? '0'),
       category_id: p.category_id ?? '',
+      location_id: p.location_id ?? '',
       quantity: '',
       description: p.description ?? '',
       low_stock_threshold: String(p.inventory?.low_stock_threshold ?? 10),
@@ -510,6 +676,7 @@ export default function InventoryScreen() {
         cost_price: costPrice,
         tax_rate: parseFloat(productForm.tax_rate || '0'),
         category_id: productForm.category_id || undefined,
+        location_id: productForm.location_id || undefined,
         description: productForm.description.trim() || undefined,
         // Services don't track a unit; omit it (server keeps its 'piece' default).
         unit: productForm.item_type === 'PRODUCT' ? (productForm.unit || 'piece') : undefined,
@@ -518,6 +685,9 @@ export default function InventoryScreen() {
       };
 
       if (editingProduct) {
+        // On edit, send null (not undefined) when cleared so the backend
+        // actually detaches the location — it only updates when key is present.
+        payload.location_id = productForm.location_id || null;
         await ApiClient.patch(`/products/${editingProduct.id}`, payload);
         const threshold = Number(productForm.low_stock_threshold || '0');
         if (productForm.item_type === 'PRODUCT' && !isNaN(threshold) && threshold > 0) {
@@ -628,11 +798,12 @@ export default function InventoryScreen() {
     if (branches.length > 1 && !selectedBranchRef.current) {
       Alert.alert(
         'Select a Branch First',
-        `Choose a specific branch from the filter bar above, then tap the button again to create a new ${activeTab === 'categories' ? 'category' : 'product'}.`
+        `Choose a specific branch from the filter bar above, then tap the button again to create a new ${activeTab === 'categories' ? 'category' : activeTab === 'locations' ? 'location' : 'product'}.`
       );
       return;
     }
     if (activeTab === 'categories') openNewCategory();
+    else if (activeTab === 'locations') openNewLocation();
     else openNewProduct();
   };
 
@@ -640,13 +811,14 @@ export default function InventoryScreen() {
   const q = searchQuery.trim().toLowerCase();
 
   const displayedProducts = (() => {
-    let list = filterCategoryId
-      ? products.filter(p => p.category_id === filterCategoryId)
-      : products;
+    let list = products;
+    if (filterCategoryId) list = list.filter(p => p.category_id === filterCategoryId);
+    if (filterLocationId) list = list.filter(p => p.location_id === filterLocationId);
     if (q) list = list.filter(p =>
       p.name.toLowerCase().includes(q) ||
       p.sku.toLowerCase().includes(q) ||
-      (p.category?.name ?? '').toLowerCase().includes(q),
+      (p.category?.name ?? '').toLowerCase().includes(q) ||
+      (p.location?.name ?? '').toLowerCase().includes(q),
     );
     // Item-type tab filter: Products = physical only, Services = services only,
     // All = both. Legacy rows without item_type count as physical products.
@@ -662,6 +834,10 @@ export default function InventoryScreen() {
     ? categories.filter(c => c.name.toLowerCase().includes(q) || (c.description ?? '').toLowerCase().includes(q))
     : categories;
 
+  const filteredLocations = q
+    ? locations.filter(l => l.name.toLowerCase().includes(q) || (l.description ?? '').toLowerCase().includes(q))
+    : locations;
+
   const filteredLowStock = q
     ? inventory.lowStockAlerts.filter((a: any) =>
         (a.product_name ?? a.name ?? '').toLowerCase().includes(q),
@@ -670,6 +846,10 @@ export default function InventoryScreen() {
 
   const filterCategoryName: string | null = filterCategoryId
     ? (categories.find(c => c.id === filterCategoryId)?.name ?? 'Unknown')
+    : null;
+
+  const filterLocationName: string | null = filterLocationId
+    ? (locations.find(l => l.id === filterLocationId)?.name ?? 'Unknown')
     : null;
 
   // Physical inventory valuation uses cost price and excludes services.
@@ -689,10 +869,12 @@ export default function InventoryScreen() {
 
   const tabData = isProductTab ? displayedProducts
     : activeTab === 'categories' ? filteredCategories
+    : activeTab === 'locations' ? filteredLocations
     : filteredLowStock;
 
   const tabRender = isProductTab ? renderProductCard
     : activeTab === 'categories' ? renderCategoryCard
+    : activeTab === 'locations' ? renderLocationCard
     : renderLowStockCard;
 
   const tabKey = (item: any) => item.id ?? item.product_id ?? String(Math.random());
@@ -700,13 +882,14 @@ export default function InventoryScreen() {
   // "All" counts every catalog item; Products/Services split it by type. These
   // counts honour the active category/search filter (via a category+search base).
   const countBase = (() => {
-    let list = filterCategoryId
-      ? products.filter(p => p.category_id === filterCategoryId)
-      : products;
+    let list = products;
+    if (filterCategoryId) list = list.filter(p => p.category_id === filterCategoryId);
+    if (filterLocationId) list = list.filter(p => p.location_id === filterLocationId);
     if (q) list = list.filter(p =>
       p.name.toLowerCase().includes(q) ||
       p.sku.toLowerCase().includes(q) ||
-      (p.category?.name ?? '').toLowerCase().includes(q),
+      (p.category?.name ?? '').toLowerCase().includes(q) ||
+      (p.location?.name ?? '').toLowerCase().includes(q),
     );
     return list;
   })();
@@ -716,6 +899,7 @@ export default function InventoryScreen() {
     products: countBase.filter(p => p.item_type !== 'SERVICE').length,
     services: countBase.filter(p => p.item_type === 'SERVICE').length,
     categories: categories.length,
+    locations: locations.length,
     'low-stock': inventory.lowStockAlerts.length,
   };
 
@@ -823,6 +1007,57 @@ export default function InventoryScreen() {
     );
   }
 
+  function renderLocationCard({ item }: { item: Location }) {
+    // Prefer the backend's active-product count; fall back to the loaded catalog.
+    const productCount = item._count?.products ?? products.filter(p => p.location_id === item.id).length;
+    const tone = getCategoryTone(item.name);
+    return (
+      <View style={styles.rowItem}>
+        <View style={[styles.rowAvatar, { backgroundColor: tone + '20' }]}>
+          <MaterialCommunityIcons name="map-marker-outline" size={20} color={tone} />
+        </View>
+
+        <View style={styles.rowBody}>
+          <View style={styles.rowTopLine}>
+            <Text style={styles.rowTitle} numberOfLines={2}>{item.name}</Text>
+            <View style={[styles.badge, { backgroundColor: C.violetBg }]}>
+              <Text style={[styles.badgeText, { color: C.accent }]}>{productCount} products</Text>
+            </View>
+          </View>
+          <View style={styles.rowBottomLine}>
+            {!!item.description && (
+              <Text style={styles.rowMeta} numberOfLines={1}>{item.description}</Text>
+            )}
+            {branches.length > 1 && item.branch_id && (
+              <Text style={[styles.rowMeta, { marginLeft: item.description ? 6 : 0 }]} numberOfLines={1}>
+                {getBranchName(item.branch_id)}
+              </Text>
+            )}
+          </View>
+        </View>
+
+        <View style={styles.rowActions}>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => handleViewLocationProducts(item)}
+            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
+            <MaterialCommunityIcons name="package-variant-closed" size={18} color={C.accent} />
+          </TouchableOpacity>
+          {canManage && (
+            <TouchableOpacity style={styles.iconBtn} onPress={() => openEditLocation(item)}
+              hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
+              <MaterialCommunityIcons name="pencil-outline" size={18} color={C.muted} />
+            </TouchableOpacity>
+          )}
+          {isAdmin && (
+            <TouchableOpacity style={styles.iconBtn} onPress={() => handleDeleteLocation(item)}
+              hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
+              <MaterialCommunityIcons name="trash-can-outline" size={18} color={C.red} />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  }
+
   function renderLowStockCard({ item }: { item: any }) {
     const qty        = Number(item.current_quantity);
     const threshold  = Number(item.low_stock_threshold ?? 20);
@@ -908,12 +1143,13 @@ export default function InventoryScreen() {
       style={styles.segmentBar}
       contentContainerStyle={styles.segmentBarContent}
     >
-      {(['all', 'products', 'services', 'categories', 'low-stock'] as TabKey[]).map(tab => {
+      {(['all', 'products', 'services', 'categories', 'locations', 'low-stock'] as TabKey[]).map(tab => {
         const labels: Record<TabKey, string> = {
           all: 'All',
           products: 'Products',
           services: 'Services',
           categories: 'Categories',
+          locations: 'Locations',
           'low-stock': 'Low Stock',
         };
         const active = activeTab === tab;
@@ -1036,6 +1272,17 @@ export default function InventoryScreen() {
             </View>
           )}
 
+          {/* Location filter banner */}
+          {filterLocationId && (
+            <View style={styles.filterBanner}>
+              <MaterialCommunityIcons name="map-marker-outline" size={14} color={C.accent} />
+              <Text style={styles.filterText}>Location: {filterLocationName}</Text>
+              <TouchableOpacity onPress={() => setFilterLocationId(null)}>
+                <MaterialCommunityIcons name="close-circle" size={16} color={C.accent} />
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* Product list */}
           {loading && displayedProducts.length === 0 ? (
             <View style={styles.loadingCenter}>
@@ -1142,6 +1389,16 @@ export default function InventoryScreen() {
                     </Text>
                     <Text style={{ fontSize: fontSize.base, color: C.ink, fontWeight: '500' }}>
                       {selectedProduct.category.name}
+                    </Text>
+                  </View>
+                )}
+                {selectedProduct.location?.name && (
+                  <View style={{ marginBottom: spacing.md }}>
+                    <Text style={{ fontSize: fontSize.xs, color: C.muted, fontWeight: '600', marginBottom: 4 }}>
+                      LOCATION
+                    </Text>
+                    <Text style={{ fontSize: fontSize.base, color: C.ink, fontWeight: '500' }}>
+                      {selectedProduct.location.name}
                     </Text>
                   </View>
                 )}
@@ -1280,12 +1537,13 @@ export default function InventoryScreen() {
         style={styles.segmentBar}
         contentContainerStyle={styles.segmentBarContent}
       >
-        {(['all', 'products', 'services', 'categories', 'low-stock'] as TabKey[]).map(tab => {
+        {(['all', 'products', 'services', 'categories', 'locations', 'low-stock'] as TabKey[]).map(tab => {
           const labels: Record<TabKey, string> = {
             all: 'All',
             products: 'Products',
             services: 'Services',
             categories: 'Categories',
+            locations: 'Locations',
             'low-stock': 'Low Stock',
           };
           const active = activeTab === tab;
@@ -1373,6 +1631,17 @@ export default function InventoryScreen() {
         </View>
       )}
 
+      {/* Location filter banner */}
+      {isProductTab && filterLocationId && (
+        <View style={styles.filterBanner}>
+          <MaterialCommunityIcons name="map-marker-outline" size={14} color={C.accent} />
+          <Text style={styles.filterText}>Location: {filterLocationName}</Text>
+          <TouchableOpacity onPress={() => setFilterLocationId(null)}>
+            <MaterialCommunityIcons name="close-circle" size={16} color={C.accent} />
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* List */}
       {loading && products.length === 0
         ? <View style={styles.loadingCenter}>
@@ -1414,7 +1683,9 @@ export default function InventoryScreen() {
                       ? `No results for "${searchQuery}"`
                       : isProductTab && filterCategoryId
                         ? `No products in "${filterCategoryName}"`
-                        : 'Nothing here yet'}
+                        : isProductTab && filterLocationId
+                          ? `No products at "${filterLocationName}"`
+                          : 'Nothing here yet'}
                   </Text>
                   {q ? (
                     <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.emptyAction}>
@@ -1424,6 +1695,12 @@ export default function InventoryScreen() {
                     </TouchableOpacity>
                   ) : isProductTab && filterCategoryId ? (
                     <TouchableOpacity onPress={() => setFilterCategoryId(null)} style={styles.emptyAction}>
+                      <Text style={{ color: C.accent, fontWeight: '600', fontSize: 14 }}>
+                        Show all products
+                      </Text>
+                    </TouchableOpacity>
+                  ) : isProductTab && filterLocationId ? (
+                    <TouchableOpacity onPress={() => setFilterLocationId(null)} style={styles.emptyAction}>
                       <Text style={{ color: C.accent, fontWeight: '600', fontSize: 14 }}>
                         Show all products
                       </Text>
@@ -1444,6 +1721,7 @@ export default function InventoryScreen() {
           />
           <Text style={styles.fabLabel}>
             {activeTab === 'categories' ? 'New Category'
+             : activeTab === 'locations' ? 'New Location'
              : activeTab === 'low-stock' ? 'Refresh'
              : activeTab === 'services'  ? 'New Service'
              : 'New Product'}
@@ -1485,6 +1763,46 @@ export default function InventoryScreen() {
             <Button onPress={() => setShowCategoryForm(false)}>Cancel</Button>
             <Button mode="contained" onPress={handleSaveCategory} loading={saving} disabled={saving}>
               {editingCategory ? 'Update' : 'Create'}
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
+
+      {/* ── Location Dialog ──────────────────────────────── */}
+      <Portal>
+        <Dialog visible={showLocationForm} onDismiss={() => setShowLocationForm(false)}>
+          <Dialog.Title>{editingLocation ? 'Edit Location' : 'New Location'}</Dialog.Title>
+          <Dialog.Content>
+            {branches.length > 1 && !editingLocation && (
+              <Surface style={styles.branchBadge} elevation={0}>
+                <MaterialCommunityIcons name="source-branch" size={15} color={C.accent} />
+                <Text style={styles.branchBadgeText}>
+                  {locationForm.branch_id
+                    ? `Branch: ${getBranchName(locationForm.branch_id)}`
+                    : 'No branch selected — use filter chips above'}
+                </Text>
+              </Surface>
+            )}
+            {branches.length > 1 && editingLocation && editingLocation.branch_id && (
+              <Surface style={styles.branchBadge} elevation={0}>
+                <MaterialCommunityIcons name="source-branch" size={15} color={C.accent} />
+                <Text style={styles.branchBadgeText}>
+                  Branch: {getBranchName(editingLocation.branch_id)}
+                </Text>
+              </Surface>
+            )}
+            <TextInput label="Location Name *" value={locationForm.name}
+              onChangeText={v => setLocationForm(f => ({ ...f, name: v }))}
+              mode="outlined" style={styles.input} autoFocus
+              placeholder="e.g. Shelf A1, Refrigerator, Counter" />
+            <TextInput label="Description (optional)" value={locationForm.description}
+              onChangeText={v => setLocationForm(f => ({ ...f, description: v }))}
+              mode="outlined" style={styles.input} multiline numberOfLines={2} />
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setShowLocationForm(false)}>Cancel</Button>
+            <Button mode="contained" onPress={handleSaveLocation} loading={saving} disabled={saving}>
+              {editingLocation ? 'Update' : 'Create'}
             </Button>
           </Dialog.Actions>
         </Dialog>
@@ -1726,6 +2044,22 @@ export default function InventoryScreen() {
                 setTimeout(() => openNewCategory(), 300);
               }}
             />
+
+            <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Location</Text>
+            <LocationDropdown
+              locations={locations}
+              value={productForm.location_id}
+              onChange={id => setProductForm(f => ({ ...f, location_id: id }))}
+              onAddNew={async () => {
+                // Same detour-safe draft save as categories above.
+                await persistDraft();
+                setShowProductForm(false);
+                setTimeout(() => openNewLocation(), 300);
+              }}
+            />
+            <HelperText type="info" style={{ marginTop: -4 }}>
+              Physical shop storage spot (e.g. Shelf A1, Refrigerator). Optional.
+            </HelperText>
 
             <TextInput label="Description (optional)" value={productForm.description}
               onChangeText={v => setProductForm(f => ({ ...f, description: v }))}

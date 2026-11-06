@@ -178,6 +178,9 @@ export default function DashboardScreen() {
   const auth  = useSelector((state: RootState) => state.auth);
   const sync  = useSelector((state: RootState) => state.sync);
   const isAdmin = ['admin', 'manager'].includes(auth.user?.role ?? '');
+  // Cashiers see a personal view: the backend scopes /analytics/dashboard to
+  // their own sales, so the UI notes that and drops the redundant cashier name.
+  const isCashier = auth.user?.role === 'cashier';
   const { isTablet, deviceType } = useResponsive();
   const spacing = responsiveSpacing(deviceType);
   const fontSize = responsiveFontSize(deviceType);
@@ -265,7 +268,7 @@ export default function DashboardScreen() {
       {/* ── Header ─────────────────────────────────────────── */}
       <View style={s.header}>
         <View style={{ flex: 1 }}>
-          <Text style={s.headerDate}>{today}</Text>
+          <Text style={s.headerDate}>{today}{isCashier ? ' · Your sales only' : ''}</Text>
           <Text style={s.headerGreet}>{greet()}, {auth.user?.first_name ?? 'there'} 👋</Text>
         </View>
         <IconBtn icon="bell-outline" />
@@ -489,7 +492,9 @@ export default function DashboardScreen() {
                 })()}
                 <View style={{ flex: 1 }}>
                   <Text style={s.txAmt} numberOfLines={1}>
-                    {t.cashier} · {t.item_count} item{t.item_count !== 1 ? 's' : ''}
+                    {isCashier
+                      ? `${t.item_count} item${t.item_count !== 1 ? 's' : ''}`
+                      : `${t.cashier} · ${t.item_count} item${t.item_count !== 1 ? 's' : ''}`}
                   </Text>
                   <Text style={s.txMeta}>
                     {METHOD_LABELS[t.payment_method] ?? t.payment_method} · {timeAgo(t.created_at)}

@@ -1,0 +1,33 @@
+# Exclude build artifacts and caches from the EAS upload archive.
+# EAS reinstalls node_modules and rebuilds native output on its servers,
+# so none of this needs to be uploaded. Keeps the archive small so the
+# upload completes over a flaky connection.
+
+# Native build outputs (regenerated on the EAS build server)
+android/build/
+android/.gradle/
+android/.kotlin/
+android/app/build/
+android/app/.cxx/
+ios/build/
+ios/Pods/
+
+# Expo / Metro caches
+.expo/
+.expo-shared/
+web-build/
+dist/
+
+# Dependencies (EAS installs these itself)
+node_modules/
+
+# Large local binaries — never needed for a build
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# VCS / editor
+.git/
+.vscode/
+.idea/

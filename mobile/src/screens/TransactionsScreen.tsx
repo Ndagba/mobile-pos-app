@@ -9,7 +9,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { useSelector } from 'react-redux';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getReceiptBranding } from '../utils/receiptBranding';
 import { RootState } from '../redux/store';
 import ApiClient from '../services/ApiClient';
 import { C, R, S, F } from '../theme';
@@ -174,6 +174,10 @@ export default function TransactionsScreen() {
   const route    = useRoute<any>();
   const user     = useSelector((s: RootState) => s.auth.user);
   const isAdmin  = ['admin', 'manager'].includes(user?.role ?? '');
+  const storeSettings = useSelector((s: RootState) => s.settings.settings);
+  // Admins/managers can always refund; cashiers only when the store permits it
+  // (`allow_cashier_refund`) — the backend enforces the same rule.
+  const canRefund = isAdmin || (user?.role === 'cashier' && !!storeSettings?.allow_cashier_refund);
   const { isTablet, deviceType } = useResponsive();
   const spacing = responsiveSpacing(deviceType);
   const fontSize = responsiveFontSize(deviceType);
@@ -378,10 +382,9 @@ export default function TransactionsScreen() {
     try {
       const tx = txDetail ?? selectedTx;
       const items = normalizeItems(tx);
-      const bizName = await AsyncStorage.getItem('@pos_business_name') || '';
-      const footerMsg = await AsyncStorage.getItem('@pos_receipt_footer') || '';
+      const { headerLines, footer: footerMsg } = await getReceiptBranding(storeSettings);
       const lines = [
-        bizName ? bizName : '',
+        ...headerLines,
         '===== RECEIPT =====',
         `Date:    ${fmtDateTime(tx.created_at)}`,
         `ID:      #${tx.id.slice(-8).toUpperCase()}`,
@@ -784,7 +787,7 @@ export default function TransactionsScreen() {
                   <MaterialCommunityIcons name="share-outline" size={16} color={C.accent} />
                   <Text style={[m.shareBtnText, { fontSize: 13 }]}>Share</Text>
                 </TouchableOpacity>
-                {isAdmin && (
+                {canRefund && (
                   <TouchableOpacity
                     style={[m.refundBtn, { flex: 1 }, selectedTx.status === 'refunded' && m.refundBtnDisabled]}
                     onPress={selectedTx.status === 'refunded' ? undefined : () => setRefundOpen(true)}
@@ -1312,7 +1315,7 @@ export default function TransactionsScreen() {
                   <MaterialCommunityIcons name="share-outline" size={17} color={C.accent} />
                   <Text style={m.shareBtnText}>Share</Text>
                 </TouchableOpacity>
-                {isAdmin && (
+                {canRefund && (
                   <TouchableOpacity
                     style={[m.refundBtn, selectedTx.status === 'refunded' && m.refundBtnDisabled]}
                     onPress={selectedTx.status === 'refunded' ? undefined : () => setRefundOpen(true)}

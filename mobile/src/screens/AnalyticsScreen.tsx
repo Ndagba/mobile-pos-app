@@ -1568,8 +1568,23 @@ export default function AnalyticsScreen() {
                     const roleColor = ROLE_COLORS[emp.role] ?? C.accent;
 
                     return (
-                      <View
+                      <TouchableOpacity
                         key={emp.id}
+                        activeOpacity={0.7}
+                        accessibilityRole="button"
+                        accessibilityLabel={`View sales by ${emp.first_name} ${emp.last_name}`}
+                        onPress={() => {
+                          // Same window the Staff tab is showing.
+                          const { dateFrom, dateTo } = getPeriodDates(period, customFrom, customTo);
+                          navigation.navigate('EmployeeSales', {
+                            userId: emp.id,
+                            name: `${emp.first_name} ${emp.last_name}`.trim(),
+                            role: emp.role,
+                            dateFrom,
+                            dateTo,
+                            periodLabel: getPeriodSubtitle(period, customFrom, customTo),
+                          });
+                        }}
                         style={[
                           s.staffRow,
                           i === staffData.length - 1 && { borderBottomWidth: 0 },
@@ -1595,7 +1610,8 @@ export default function AnalyticsScreen() {
                         <Text style={[s.staffRevenue, MONO]} numberOfLines={1}>
                           {formatCurrency(emp.total_revenue)}
                         </Text>
-                      </View>
+                        <MaterialCommunityIcons name="chevron-right" size={18} color={C.muted} />
+                      </TouchableOpacity>
                     );
                   })
                 )}

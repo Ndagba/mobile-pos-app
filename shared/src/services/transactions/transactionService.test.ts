@@ -175,6 +175,31 @@ describe('syncPendingTransactions', () => {
     expect(txs.every((t) => t.is_sync_online)).toBe(true);
   });
 
+  it('forwards payment_splits in the batch payload for a split sale', async () => {
+    const offlineApi = makeApi(async () => {
+      throw new Error('offline');
+    });
+    const { store } = makeStore();
+    const splitDraft = buildTransactionInput(cart, {
+      store_id: 'store_001',
+      branch_id: 'b1',
+      payment_method: 'split',
+      payment_splits: { cash: 100, card: 0, transfer: 115 },
+    });
+    await createTransaction(splitDraft, deps(offlineApi, store, false));
+
+    let sentRow: { payment_method?: string; payment_splits?: unknown } | undefined;
+    const api = makeApi(async (_url, body) => {
+      sentRow = (body as { transactions: Array<typeof sentRow> }).transactions[0];
+      return { results: [], errors: [] };
+    });
+
+    await syncPendingTransactions({ api, store });
+
+    expect(sentRow?.payment_method).toBe('split');
+    expect(sentRow?.payment_splits).toEqual({ cash: 100, card: 0, transfer: 115 });
+  });
+
   it('counts per-row errors and leaves those rows pending', async () => {
     const offlineApi = makeApi(async () => {
       throw new Error('offline');

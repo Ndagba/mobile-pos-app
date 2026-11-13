@@ -150,6 +150,9 @@ export async function syncPendingTransactions(deps: SyncDeps): Promise<SyncResul
     discount_amount: tx.discount_amount,
     total_amount: tx.total_amount,
     payment_method: tx.payment_method,
+    // Forward split allocations so a split sale created offline keeps its
+    // cash/card/transfer breakdown when the queue is drained on reconnect.
+    payment_splits: tx.payment_splits,
     items: tx.items,
   }));
 

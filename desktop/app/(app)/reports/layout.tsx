@@ -17,6 +17,8 @@ const REPORT_TABS: { label: string; href: string; match?: string[] }[] = [
   { label: 'Cashiers', href: '/reports/employees' },
   { label: 'Debt', href: '/reports/debt' },
   { label: 'Discounts', href: '/reports/discounts' },
+  { label: 'End of day', href: '/reports/eod' },
+  { label: 'Voids & refunds', href: '/reports/voids' },
   { label: 'Profit & loss', href: '/admin/financials/pl' },
 ];
 

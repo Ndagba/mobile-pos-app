@@ -17,7 +17,7 @@ import ApiClient from './services/ApiClient';
 import { SyncManager } from './services/SyncManager';
 import NotificationService from './services/NotificationService';
 import { setConnected, setLastSyncAt, setSyncMode, clearSyncQueue } from './redux/slices/syncSlice';
-import { setStoreSettings } from './redux/slices/settingsSlice';
+import { setStoreSettings, normalizeStoreSettings } from './redux/slices/settingsSlice';
 import FloatingTabBar from './components/ui/FloatingTabBar';
 import { useResponsive, responsiveSpacing, responsiveFontSize } from './utils/responsiveDesign';
 import { C } from './theme';
@@ -62,12 +62,9 @@ async function prefetchSettings() {
   try {
     const res: any = await ApiClient.get('/settings');
     const data = res?.data ?? res;
-    store.dispatch(setStoreSettings({
-      allow_cashier_add_customers: data?.allow_cashier_add_customers ?? true,
-      allow_cashier_edit_customers: data?.allow_cashier_edit_customers ?? true,
-      customer_menu_enabled: data?.customer_menu_enabled ?? true,
-      supplier_menu_enabled: data?.supplier_menu_enabled ?? true,
-    }));
+    // Full row: cashier flags, business profile, receipt and the cashier
+    // discount/refund rules that checkout and sales history enforce.
+    store.dispatch(setStoreSettings(normalizeStoreSettings(data)));
   } catch (e) {
     console.warn('Failed to prefetch store settings:', e);
   }
@@ -103,6 +100,15 @@ import CashShiftsScreen from './screens/CashShiftsScreen';
 import EODReportsScreen from './screens/EODReportsScreen';
 import AuditLogsScreen from './screens/AuditLogsScreen';
 import ExpensesScreen from './screens/ExpensesScreen';
+import PurchasingScreen from './screens/PurchasingScreen';
+import PurchaseOrderFormScreen from './screens/PurchaseOrderFormScreen';
+import PurchaseOrderDetailScreen from './screens/PurchaseOrderDetailScreen';
+import ProfitLossScreen from './screens/ProfitLossScreen';
+import InventoryTurnoverScreen from './screens/InventoryTurnoverScreen';
+import BatchesScreen from './screens/BatchesScreen';
+import ProfileScreen from './screens/ProfileScreen';
+import EmployeeSalesScreen from './screens/EmployeeSalesScreen';
+import AlertsScreen from './screens/AlertsScreen';
 
 const Tab   = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -189,6 +195,18 @@ function TabletNavigationRoot() {
         <Stack.Screen name="AuditLogs" component={AuditLogsScreen} />
         {/* Admin only: gating is enforced at the screen entry point */}
         <Stack.Screen name="Expenses" component={ExpensesScreen} />
+        {/* Admin + manager only: entry is hidden for cashiers and each screen re-checks the role */}
+        <Stack.Screen name="Purchasing" component={PurchasingScreen} />
+        <Stack.Screen name="PurchaseOrderNew" component={PurchaseOrderFormScreen} />
+        <Stack.Screen name="PurchaseOrderDetail" component={PurchaseOrderDetailScreen} />
+        {/* Admin + manager reports: each screen re-checks the role */}
+        <Stack.Screen name="ProfitLoss" component={ProfitLossScreen} />
+        <Stack.Screen name="InventoryTurnover" component={InventoryTurnoverScreen} />
+        <Stack.Screen name="Batches" component={BatchesScreen} />
+        <Stack.Screen name="EmployeeSales" component={EmployeeSalesScreen} />
+        {/* Every role: account overview + own password (admin/manager) */}
+        <Stack.Screen name="Profile" component={ProfileScreen} />
+        <Stack.Screen name="Alerts" component={AlertsScreen} />
         {/* Super-admin only: gating is enforced at the screen entry point */}
         <Stack.Screen name="AdminSubscriptions" component={AdminSubscriptionsScreen} />
       </Stack.Group>
@@ -415,6 +433,18 @@ function AuthenticatedRoot() {
       <Stack.Screen name="EODReports" component={EODReportsScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="AuditLogs" component={AuditLogsScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Expenses" component={ExpensesScreen} options={{ presentation: 'modal' }} />
+      {/* Admin + manager only: entry is hidden for cashiers and each screen re-checks the role */}
+      <Stack.Screen name="Purchasing" component={PurchasingScreen} />
+      <Stack.Screen name="PurchaseOrderNew" component={PurchaseOrderFormScreen} />
+      <Stack.Screen name="PurchaseOrderDetail" component={PurchaseOrderDetailScreen} />
+      {/* Admin + manager reports: each screen re-checks the role */}
+      <Stack.Screen name="ProfitLoss" component={ProfitLossScreen} />
+      <Stack.Screen name="InventoryTurnover" component={InventoryTurnoverScreen} />
+      <Stack.Screen name="Batches" component={BatchesScreen} />
+      <Stack.Screen name="EmployeeSales" component={EmployeeSalesScreen} />
+      {/* Every role: account overview + own password (admin/manager) */}
+      <Stack.Screen name="Profile" component={ProfileScreen} />
+      <Stack.Screen name="Alerts" component={AlertsScreen} />
       {/* Super-admin only: gating is enforced at the screen entry point */}
       <Stack.Screen
         name="AdminSubscriptions"

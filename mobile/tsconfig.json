@@ -1,4 +1,10 @@
 {
-  "compilerOptions": {},
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@jaypos/shared": ["../shared/src/index.ts"],
+      "@jaypos/shared/*": ["../shared/src/*"]
+    }
+  },
   "extends": "expo/tsconfig.base"
 }

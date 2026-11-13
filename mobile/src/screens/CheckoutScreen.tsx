@@ -8,11 +8,9 @@ import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/nativ
 import { useDispatch, useSelector } from 'react-redux';
 import * as SecureStore from 'expo-secure-store';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { RootState } from '../redux/store';
-import { addItem, removeItem, updateQuantity, clearCart } from '../redux/slices/cartSlice';
-import { TransactionService, TransactionInput } from '../services/TransactionService';
+import { addItem, removeItem, updateQuantity, setDiscount, clearCart } from '../redux/slices/cartSlice';
 import { setSyncMode, addToSyncQueue } from '../redux/slices/syncSlice';
 import ApiClient, { API_BASE_URL } from '../services/ApiClient';
 import { CachedImage } from '../components/ui/CachedImage';
@@ -23,23 +21,26 @@ import { C, R, S, naira } from '../theme';
 import { useResponsive, responsiveSpacing, responsiveFontSize } from '../utils/responsiveDesign';
 import CustomerSearchModal from '../components/CustomerSearchModal';
 import BarcodeScannerModal from '../components/BarcodeScannerModal';
+import PaymentModal from '../components/PaymentModal';
+import { holdSale, listHeldSales, deleteHeldSale, type HeldSale } from '../services/HeldSalesService';
 import type { Customer } from '../redux/slices/customersSlice';
 import { tracksInventory, getAvailableStock, isOutOfStock, canIncrementQuantity } from '../utils/inventory';
+import { buildTransactionInput, createTransaction, cashierDiscountRule, clampDiscount } from '@jaypos/shared';
+import { getReceiptBranding } from '../utils/receiptBranding';
+import type { PaymentMethod, SplitPaymentAllocations } from '@jaypos/shared';
 
-type PaymentMethod = 'cash' | 'card' | 'mobile_wallet';
+/** Human label for a payment method on the receipt. */
+const paymentLabel = (pm: string): string =>
+  pm === 'transfer' ? 'Transfer' : pm === 'card' ? 'Card' : pm === 'split' ? 'Split' : 'Cash';
+
 interface Branch { id: string; name: string; is_active: boolean; }
 interface ReceiptData {
   receipt_number: string; transaction_id: string;
   items: Array<{ product_name: string; quantity: number; unit_price: number; line_total: number }>;
   subtotal: number; tax_amount: number; discount_amount: number; total: number;
-  payment_method: string; timestamp: string; branch_name?: string;
+  payment_method: string; payment_label: string; payment_splits?: SplitPaymentAllocations;
+  timestamp: string; branch_name?: string;
 }
-
-const PAY_OPTIONS: { id: PaymentMethod; label: string; icon: string }[] = [
-  { id: 'cash',          label: 'Cash',     icon: 'cash'           },
-  { id: 'card',          label: 'Card',     icon: 'credit-card'    },
-  { id: 'mobile_wallet', label: 'Transfer', icon: 'bank-transfer'  },
-];
 
 const BRANCH_ALL_ID = '__all__';
 
@@ -116,7 +117,10 @@ export default function CheckoutScreen() {
   const spacing = responsiveSpacing(deviceType);
   const fontSize = responsiveFontSize(deviceType);
 
-  const [selectedPayment, setSelectedPayment] = useState<PaymentMethod | null>(null);
+  const [payOpen,         setPayOpen]          = useState(false);
+  const [discountInput,   setDiscountInput]     = useState('');
+  const [heldOpen,        setHeldOpen]          = useState(false);
+  const [held,            setHeld]              = useState<HeldSale[]>([]);
   const [processing,      setProcessing]      = useState(false);
   const [searchQuery,     setSearchQuery]      = useState('');
   const [typeFilter,      setTypeFilter]        = useState<ItemTypeFilter>('ALL');
@@ -161,6 +165,7 @@ export default function CheckoutScreen() {
     const init = async () => {
       if (isAdmin) await loadBranches();
       loadProducts(selectedBranchRef.current);
+      listHeldSales().then(setHeld).catch(() => {});
     };
     init();
   }, []));
@@ -201,7 +206,7 @@ export default function CheckoutScreen() {
       Alert.alert('Switch Branch?', 'Switching branch will clear the cart. Continue?', [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Switch & Clear', style: 'destructive', onPress: () => {
-          dispatch(clearCart()); setSelectedPayment(null);
+          dispatch(clearCart()); setDiscountInput('');
           selectedBranchRef.current = branchId; setSelectedBranchId(branchId);
           loadProducts(branchId);
         }},
@@ -256,17 +261,81 @@ export default function CheckoutScreen() {
     }
   };
 
-  const handleCharge = async () => {
-    if (!selectedPayment) { Alert.alert('Select Payment', 'Choose a payment method first'); return; }
-    if (cart.items.length === 0) { Alert.alert('Empty Cart', 'Add at least one product'); return; }
+  // ── Discount (store-level, applied after tax) ──────────────────
+  // Cashiers can be blocked from discounting (`allow_cashier_discount`) or capped
+  // to a share of the subtotal (`max_discount_percent`) by the store settings;
+  // admins/managers are never limited. Same shared rule the desktop applies.
+  const discountRule = cashierDiscountRule(user, settings, cart.subtotal);
+  const applyDiscount = (raw: string) => {
+    const requested = Math.max(0, Number(raw) || 0);
+    const clamped = clampDiscount(requested, discountRule);
+    // Show the capped figure when the cap bites; otherwise keep what was typed ("12.").
+    setDiscountInput(clamped !== requested ? String(clamped) : raw);
+    dispatch(setDiscount(clamped));
+  };
 
-    let finalBranchId = selectedBranchRef.current;
-    if (isAdmin && !finalBranchId && branches.length === 1) {
-      finalBranchId = branches[0].id;
+  // Keep an existing discount inside the cap when the cart shrinks, a held sale
+  // is resumed, or the store settings change underneath it.
+  useEffect(() => {
+    const clamped = clampDiscount(cart.discount_amount, discountRule);
+    if (clamped !== cart.discount_amount) {
+      dispatch(setDiscount(clamped));
+      setDiscountInput(clamped ? String(clamped) : '');
     }
+  }, [cart.discount_amount, discountRule.allowed, discountRule.cap]);
 
+  const discountHint = !discountRule.allowed
+    ? 'Disabled for cashiers'
+    : discountRule.maxPercent != null
+      ? `max ${discountRule.maxPercent}%`
+      : null;
+
+  // ── Hold / Resume parked sales ─────────────────────────────────
+  const refreshHeld = useCallback(() => {
+    listHeldSales().then(setHeld).catch(() => {});
+  }, []);
+
+  const handleHold = () => {
+    if (cart.items.length === 0) return;
+    holdSale({ items: cart.items, discount_amount: cart.discount_amount, customer: selectedCustomer })
+      .then(() => {
+        dispatch(clearCart());
+        setSelectedCustomer(null);
+        setDiscountInput('');
+        refreshHeld();
+        Alert.alert('Sale held', 'The sale was parked. Resume it from Held.');
+      })
+      .catch(() => Alert.alert('Error', 'Could not hold the sale'));
+  };
+
+  const resumeHeld = async (sale: HeldSale) => {
+    dispatch(clearCart());
+    sale.items.forEach(it => dispatch(addItem(it)));
+    dispatch(setDiscount(sale.discount_amount || 0));
+    setDiscountInput(sale.discount_amount ? String(sale.discount_amount) : '');
+    setSelectedCustomer(sale.customer ?? null);
+    await deleteHeldSale(sale.id);
+    refreshHeld();
+    setHeldOpen(false);
+  };
+
+  // Validate branch + cart, then open the payment sheet.
+  const openPayment = () => {
+    if (cart.items.length === 0) { Alert.alert('Empty Cart', 'Add at least one product'); return; }
+    let finalBranchId = selectedBranchRef.current;
+    if (isAdmin && !finalBranchId && branches.length === 1) finalBranchId = branches[0].id;
     if (isAdmin && !finalBranchId) { Alert.alert('Select Branch', 'Choose a specific branch before processing.'); return; }
     if (!isAdmin && !user?.branch_id) { Alert.alert('No Branch Assigned', 'Your account has no branch assigned. Please contact your administrator before making a sale.'); return; }
+    setPayOpen(true);
+  };
+
+  // Finalize the sale via the shared build + create path (desktop parity:
+  // identical totals, byte-identical offline_session_hash, payment_splits).
+  const completeSale = async (method: PaymentMethod, splits?: SplitPaymentAllocations) => {
+    let finalBranchId = selectedBranchRef.current;
+    if (isAdmin && !finalBranchId && branches.length === 1) finalBranchId = branches[0].id;
+    const branchId = isAdmin ? finalBranchId : (user?.branch_id || undefined);
+    if (!branchId) { Alert.alert('Select Branch', 'Choose a specific branch before processing.'); return; }
 
     setProcessing(true);
     try {
@@ -274,46 +343,58 @@ export default function CheckoutScreen() {
         ? branches.find(b => b.id === finalBranchId)?.name
         : user?.branch_name ?? undefined;
 
-      const input: TransactionInput = {
-        store_id: user?.store_id || 'store_001', user_id: user?.id || 'user_123',
-        branch_id: isAdmin ? finalBranchId : (user?.branch_id || undefined),
+      const draft = buildTransactionInput(cart.items, {
+        store_id: user?.store_id || 'store_001',
+        branch_id: branchId,
         customer_id: selectedCustomer?.id || undefined,
-        items: cart.items.map(it => ({
-          product_id: it.product_id,
-          product_name: it.product_name,
-          quantity: it.quantity,
-          unit_price: Number(it.unit_price) || 0,
-          tax_amount: Math.round((it.unit_price * it.quantity * (it.tax_rate || 0)) / 100 * 100) / 100,
-          line_total: Number(it.unit_price) * it.quantity || 0,
-        })),
-        subtotal: Math.round(cart.subtotal * 100) / 100,
-        tax_amount: Math.round(cart.tax_amount * 100) / 100,
-        discount_amount: Math.round(cart.discount_amount * 100) / 100,
-        total_amount: Math.round(cart.total * 100) / 100,
-        payment_method: selectedPayment,
-      };
+        discount_amount: cart.discount_amount,
+        payment_method: method,
+        payment_splits: splits,
+      });
+
       const deviceId = (await SecureStore.getItemAsync('device_id')) || 'unknown';
       const isOnline = ApiClient.getOnlineStatus();
-      const result   = await TransactionService.createTransaction(input, deviceId, isOnline);
+      const result = await createTransaction(draft, {
+        api: ApiClient,
+        store: DatabaseService,
+        deviceId,
+        isOnline,
+      });
 
-      if (result.success) {
-        // Local notifications — fire-and-forget; toggles checked inside the service
-        NotificationService.notifySaleCompleted(Math.round(cart.total * 100) / 100);
-        cart.items.forEach(it => {
-          const product = products.find(p => p.id === it.product_id);
-          const onHand = Number(product?.inventory?.quantity_on_hand);
-          if (tracksInventory(product) && Number.isFinite(onHand)) {
-            NotificationService.checkLowStock(it.product_name, onHand - it.quantity);
-          }
-        });
-
-        if (!isOnline || result.status === 'queued_for_sync') {
-          dispatch(addToSyncQueue({ id: generateId(), transaction_id: result.transaction_id, offline_session_hash: `${deviceId}-${result.transaction_id}-${Date.now()}`, status: 'pending', created_at: new Date().toISOString() }));
-          dispatch(setSyncMode('OFFLINE'));
+      // Snapshot the cart BEFORE clearing so the receipt + alerts stay accurate.
+      const soldItems = cart.items;
+      NotificationService.notifySaleCompleted(draft.total_amount);
+      soldItems.forEach(it => {
+        const product = products.find(p => p.id === it.product_id);
+        const onHand = Number(product?.inventory?.quantity_on_hand);
+        if (tracksInventory(product) && Number.isFinite(onHand)) {
+          NotificationService.checkLowStock(it.product_name, onHand - it.quantity);
         }
-        dispatch(clearCart()); setSelectedPayment(null); setSelectedCustomer(null);
-        setReceipt({ receipt_number: result.receipt_number || result.transaction_id, transaction_id: result.transaction_id, items: cart.items.map(i => ({ product_name: i.product_name, quantity: i.quantity, unit_price: Number(i.unit_price) || 0, line_total: (Number(i.unit_price) || 0) * i.quantity })), subtotal: Math.round(cart.subtotal * 100) / 100, tax_amount: Math.round(cart.tax_amount * 100) / 100, discount_amount: Math.round(cart.discount_amount * 100) / 100, total: Math.round(cart.total * 100) / 100, payment_method: selectedPayment, timestamp: new Date().toLocaleString(), branch_name: branchName });
+      });
+
+      if (result.status === 'queued_for_sync' || result.status === 'offline') {
+        dispatch(addToSyncQueue({ id: generateId(), transaction_id: result.transaction_id, offline_session_hash: result.offline_session_hash, status: 'pending', created_at: new Date().toISOString() }));
+        dispatch(setSyncMode('OFFLINE'));
       }
+
+      dispatch(clearCart());
+      setSelectedCustomer(null);
+      setDiscountInput('');
+      setPayOpen(false);
+      setReceipt({
+        receipt_number: result.receipt_number || result.transaction_id,
+        transaction_id: result.transaction_id,
+        items: soldItems.map(i => ({ product_name: i.product_name, quantity: i.quantity, unit_price: Number(i.unit_price) || 0, line_total: (Number(i.unit_price) || 0) * i.quantity })),
+        subtotal: draft.subtotal,
+        tax_amount: draft.tax_amount,
+        discount_amount: draft.discount_amount,
+        total: draft.total_amount,
+        payment_method: method,
+        payment_label: paymentLabel(method),
+        payment_splits: splits,
+        timestamp: new Date().toLocaleString(),
+        branch_name: branchName,
+      });
     } catch (error: any) {
       Alert.alert('Error', error?.response?.data?.message || error?.message || 'Transaction failed');
     } finally { setProcessing(false); }
@@ -322,10 +403,11 @@ export default function CheckoutScreen() {
   const handlePrintReceipt = async () => {
     if (!receipt) return;
     try {
-      const bizName = await AsyncStorage.getItem('@pos_business_name') || '';
-      const footerMsg = await AsyncStorage.getItem('@pos_receipt_footer') || 'Thank you for your purchase!';
+      // Business name / RC number / address / footer from the store settings
+      // (same as the desktop receipt), falling back to legacy device-local text.
+      const { headerLines, footer: footerMsg } = await getReceiptBranding(settings, 'Thank you for your purchase!');
       const lines = [
-        bizName ? bizName : '',
+        ...headerLines,
         '===== RECEIPT =====',
         receipt.branch_name ? `Branch:  ${receipt.branch_name}` : '',
         `Receipt: ${receipt.receipt_number}`,
@@ -337,7 +419,14 @@ export default function CheckoutScreen() {
         `VAT:       ₦${receipt.tax_amount.toLocaleString()}`,
         receipt.discount_amount > 0 ? `Discount:  -₦${receipt.discount_amount.toLocaleString()}` : '',
         `TOTAL:     ₦${receipt.total.toLocaleString()}`,
-        `Payment:   ${receipt.payment_method === 'mobile_wallet' ? 'TRANSFER' : receipt.payment_method.toUpperCase()}`,
+        `Payment:   ${receipt.payment_label.toUpperCase()}`,
+        ...(receipt.payment_splits
+          ? [
+              `  Cash:     ₦${Number(receipt.payment_splits.cash || 0).toLocaleString()}`,
+              `  Card:     ₦${Number(receipt.payment_splits.card || 0).toLocaleString()}`,
+              `  Transfer: ₦${Number(receipt.payment_splits.transfer || 0).toLocaleString()}`,
+            ]
+          : []),
         '================================',
         footerMsg ? footerMsg : '',
       ].filter(Boolean).join('\n');
@@ -387,6 +476,45 @@ export default function CheckoutScreen() {
         );
       })}
     </View>
+  );
+
+  // Held (parked) sales list — shared by the tablet and phone layouts.
+  const renderHeldModal = () => (
+    <Modal visible={heldOpen} transparent animationType="fade" onRequestClose={() => setHeldOpen(false)}>
+      <TouchableOpacity style={s.heldOverlay} activeOpacity={1} onPress={() => setHeldOpen(false)}>
+        <View style={s.heldSheet}>
+          <View style={s.heldHeader}>
+            <Text style={s.heldTitle}>Held sales</Text>
+            <TouchableOpacity onPress={() => setHeldOpen(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <MaterialCommunityIcons name="close" size={20} color={C.muted} />
+            </TouchableOpacity>
+          </View>
+          {held.length === 0 ? (
+            <Text style={s.heldEmpty}>No held sales</Text>
+          ) : (
+            <ScrollView style={{ maxHeight: 360 }}>
+              {held.map(h => (
+                <View key={h.id} style={s.heldItem}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.heldItemLabel} numberOfLines={1}>{h.label}</Text>
+                    <Text style={s.heldItemSub}>
+                      {h.items.length} item{h.items.length === 1 ? '' : 's'} · {new Date(h.created_at).toLocaleTimeString()}
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={() => resumeHeld(h)} style={s.heldResumeBtn} activeOpacity={0.8}>
+                    <MaterialCommunityIcons name="restore" size={14} color={C.accent} />
+                    <Text style={s.heldResumeText}>Resume</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => deleteHeldSale(h.id).then(refreshHeld)} style={{ padding: 6 }} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                    <MaterialCommunityIcons name="trash-can-outline" size={16} color={C.muted} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+        </View>
+      </TouchableOpacity>
+    </Modal>
   );
 
   // ── Tablet layout with side-by-side product + cart ────
@@ -631,21 +759,32 @@ export default function CheckoutScreen() {
                 )}
               </TouchableOpacity>
 
-              {/* Payment methods */}
-              <View style={[s.payRow, { marginBottom: spacing.md }]}>
-                {PAY_OPTIONS.map(m => (
-                  <TouchableOpacity
-                    key={m.id}
-                    onPress={() => setSelectedPayment(m.id)}
-                    style={[s.payBtn, { flex: 1 }, selectedPayment === m.id && s.payBtnActive]}
-                    activeOpacity={0.7}
-                  >
-                    <MaterialCommunityIcons name={m.icon as any} size={14} color={selectedPayment === m.id ? C.accent : C.ink} />
-                    <Text style={[s.payLabel, { fontSize: fontSize.xs }, selectedPayment === m.id && { color: C.accent }]}>
-                      {m.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+              {/* Resume held */}
+              {held.length > 0 && (
+                <TouchableOpacity onPress={() => setHeldOpen(true)} style={[s.heldTrigger, { marginBottom: spacing.md }]} activeOpacity={0.8}>
+                  <MaterialCommunityIcons name="clock-outline" size={15} color={C.accent} />
+                  <Text style={s.heldTriggerText}>Resume held ({held.length})</Text>
+                </TouchableOpacity>
+              )}
+
+              {/* Discount */}
+              <View style={[s.discountRow, { marginBottom: spacing.md }]}>
+                <MaterialCommunityIcons name="tag-outline" size={16} color={C.muted} />
+                <Text style={[s.discountLabel, { fontSize: fontSize.sm }]}>
+                  Discount{discountHint ? <Text style={s.discountHint}>  {discountHint}</Text> : null}
+                </Text>
+                <View style={[s.discountInputWrap, !discountRule.allowed && { opacity: 0.45 }]}>
+                  <Text style={s.discountNaira}>₦</Text>
+                  <TextInput
+                    style={[s.discountInput, { fontSize: fontSize.sm }]}
+                    value={discountInput}
+                    onChangeText={applyDiscount}
+                    editable={discountRule.allowed}
+                    placeholder={discountRule.allowed ? '0' : '—'}
+                    placeholderTextColor={C.muted}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
               </View>
 
               {/* Cart summary */}
@@ -654,6 +793,12 @@ export default function CheckoutScreen() {
                   <Text style={[s.cartVat, { fontSize: fontSize.sm }]}>Subtotal</Text>
                   <Text style={[s.cartVat, { fontSize: fontSize.sm, fontWeight: '600' }]}>₦{cart.subtotal.toLocaleString()}</Text>
                 </View>
+                {cart.discount_amount > 0 && (
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
+                    <Text style={[s.cartVat, { fontSize: fontSize.sm }]}>Discount</Text>
+                    <Text style={[s.cartVat, { fontSize: fontSize.sm, fontWeight: '600', color: C.green }]}>− ₦{cart.discount_amount.toLocaleString()}</Text>
+                  </View>
+                )}
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
                   <Text style={[s.cartVat, { fontSize: fontSize.sm }]}>VAT</Text>
                   <Text style={[s.cartVat, { fontSize: fontSize.sm, fontWeight: '600' }]}>₦{cart.tax_amount.toLocaleString()}</Text>
@@ -664,18 +809,29 @@ export default function CheckoutScreen() {
                 </View>
               </View>
 
-              {/* Charge button */}
-              <TouchableOpacity
-                onPress={handleCharge}
-                disabled={processing || cartCount === 0 || !selectedPayment || (isAdmin && !selectedBranchId)}
-                activeOpacity={0.85}
-                style={[s.chargeBtn, (cartCount === 0 || !selectedPayment || (isAdmin && !selectedBranchId)) && s.chargeBtnDisabled]}
-              >
-                <MaterialCommunityIcons name="check" size={16} color={cartCount > 0 && selectedPayment ? C.accentFg : C.muted} />
-                <Text style={[s.chargeLabel, { fontSize: fontSize.sm }, (cartCount === 0 || !selectedPayment) && { color: C.muted }]}>
-                  {processing ? 'Processing…' : 'Checkout'}
-                </Text>
-              </TouchableOpacity>
+              {/* Hold + Charge */}
+              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                <TouchableOpacity
+                  onPress={handleHold}
+                  disabled={cartCount === 0}
+                  activeOpacity={0.85}
+                  style={[s.holdBtn, cartCount === 0 && { opacity: 0.4 }]}
+                >
+                  <MaterialCommunityIcons name="pause" size={16} color={C.ink} />
+                  <Text style={[s.holdLabel, { fontSize: fontSize.sm }]}>Hold</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={openPayment}
+                  disabled={processing || cartCount === 0 || (isAdmin && !selectedBranchId)}
+                  activeOpacity={0.85}
+                  style={[s.chargeBtn, { flex: 1 }, (cartCount === 0 || (isAdmin && !selectedBranchId)) && s.chargeBtnDisabled]}
+                >
+                  <MaterialCommunityIcons name="credit-card-outline" size={16} color={cartCount > 0 ? C.accentFg : C.muted} />
+                  <Text style={[s.chargeLabel, { fontSize: fontSize.sm }, cartCount === 0 && { color: C.muted }]}>
+                    {processing ? 'Processing…' : `Charge ₦${(cart.total || 0).toLocaleString()}`}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
         </View>
@@ -785,10 +941,20 @@ export default function CheckoutScreen() {
                 </View>
                 <View style={[s.rcptTotalRow, { marginTop: spacing.sm }]}>
                   <Text style={s.rcptMeta}>Payment Method</Text>
-                  <Text style={s.rcptMeta}>
-                    {receipt?.payment_method === 'mobile_wallet' ? 'TRANSFER' : receipt?.payment_method?.toUpperCase()}
-                  </Text>
+                  <Text style={s.rcptMeta}>{receipt?.payment_label?.toUpperCase()}</Text>
                 </View>
+                {receipt?.payment_splits && (
+                  <View style={{ marginTop: 4 }}>
+                    {([['Cash', receipt.payment_splits.cash], ['Card', receipt.payment_splits.card], ['Transfer', receipt.payment_splits.transfer]] as [string, number][])
+                      .filter(([, v]) => Number(v) > 0)
+                      .map(([label, v]) => (
+                        <View key={label} style={s.rcptTotalRow}>
+                          <Text style={s.rcptMeta}>  {label}</Text>
+                          <Text style={s.rcptMeta}>₦{Number(v || 0).toLocaleString()}</Text>
+                        </View>
+                      ))}
+                  </View>
+                )}
               </View>
             </ScrollView>
 
@@ -804,6 +970,16 @@ export default function CheckoutScreen() {
             </View>
           </View>
         </Modal>
+
+        <PaymentModal
+          visible={payOpen}
+          onClose={() => setPayOpen(false)}
+          total={cart.total || 0}
+          processing={processing}
+          onConfirm={completeSale}
+        />
+
+        {renderHeldModal()}
       </View>
     );
   }
@@ -1082,39 +1258,61 @@ export default function CheckoutScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Payment methods */}
-        <View style={s.payRow}>
-          {PAY_OPTIONS.map(m => (
-            <TouchableOpacity
-              key={m.id} onPress={() => setSelectedPayment(m.id)}
-              style={[s.payBtn, selectedPayment === m.id && s.payBtnActive]}
-              activeOpacity={0.7}
-            >
-              <MaterialCommunityIcons name={m.icon as any} size={16}
-                color={selectedPayment === m.id ? C.accent : C.ink} />
-              <Text style={[s.payLabel, selectedPayment === m.id && { color: C.accent }]}>
-                {m.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {/* Discount + Resume held */}
+        {cartCount > 0 && (
+          <View style={s.discountRow}>
+            <MaterialCommunityIcons name="tag-outline" size={16} color={C.muted} />
+            <Text style={s.discountLabel}>
+              Discount{discountHint ? <Text style={s.discountHint}>  {discountHint}</Text> : null}
+            </Text>
+            <View style={[s.discountInputWrap, !discountRule.allowed && { opacity: 0.45 }]}>
+              <Text style={s.discountNaira}>₦</Text>
+              <TextInput
+                style={s.discountInput}
+                value={discountInput}
+                onChangeText={applyDiscount}
+                editable={discountRule.allowed}
+                placeholder={discountRule.allowed ? '0' : '—'}
+                placeholderTextColor={C.muted}
+                keyboardType="decimal-pad"
+              />
+            </View>
+          </View>
+        )}
+        {held.length > 0 && (
+          <TouchableOpacity onPress={() => setHeldOpen(true)} style={s.heldTrigger} activeOpacity={0.8}>
+            <MaterialCommunityIcons name="clock-outline" size={15} color={C.accent} />
+            <Text style={s.heldTriggerText}>Resume held ({held.length})</Text>
+          </TouchableOpacity>
+        )}
 
         {sync.mode === 'OFFLINE' && (
           <Text style={s.offlineNote}>⚠  Offline — will sync when connected</Text>
         )}
 
-        {/* Charge button */}
-        <TouchableOpacity
-          onPress={handleCharge}
-          disabled={processing || cartCount === 0 || !selectedPayment}
-          activeOpacity={0.85}
-          style={[s.chargeBtn, (cartCount === 0 || !selectedPayment) && s.chargeBtnDisabled]}
-        >
-          <MaterialCommunityIcons name="check" size={18} color={cartCount > 0 && selectedPayment ? C.accentFg : C.muted} />
-          <Text style={[s.chargeLabel, (cartCount === 0 || !selectedPayment) && { color: C.muted }]}>
-            {processing ? 'Processing…' : `Charge ₦${cart.total.toLocaleString()}`}
-          </Text>
-        </TouchableOpacity>
+        {/* Hold + Charge */}
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity
+            onPress={handleHold}
+            disabled={cartCount === 0}
+            activeOpacity={0.85}
+            style={[s.holdBtn, cartCount === 0 && { opacity: 0.4 }]}
+          >
+            <MaterialCommunityIcons name="pause" size={18} color={C.ink} />
+            <Text style={s.holdLabel}>Hold</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={openPayment}
+            disabled={processing || cartCount === 0}
+            activeOpacity={0.85}
+            style={[s.chargeBtn, { flex: 1 }, cartCount === 0 && s.chargeBtnDisabled]}
+          >
+            <MaterialCommunityIcons name="credit-card-outline" size={18} color={cartCount > 0 ? C.accentFg : C.muted} />
+            <Text style={[s.chargeLabel, cartCount === 0 && { color: C.muted }]}>
+              {processing ? 'Processing…' : `Charge ₦${cart.total.toLocaleString()}`}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* ── Branch dropdown ───────────────────────────────────── */}
@@ -1209,10 +1407,20 @@ export default function CheckoutScreen() {
               </View>
               <View style={[s.rcptTotalRow, { marginTop: 4 }]}>
                 <Text style={s.rcptMeta}>Payment Method</Text>
-                <Text style={s.rcptMeta}>
-                  {receipt?.payment_method === 'mobile_wallet' ? 'TRANSFER' : receipt?.payment_method?.toUpperCase()}
-                </Text>
+                <Text style={s.rcptMeta}>{receipt?.payment_label?.toUpperCase()}</Text>
               </View>
+              {receipt?.payment_splits && (
+                <View style={{ marginTop: 4 }}>
+                  {([['Cash', receipt.payment_splits.cash], ['Card', receipt.payment_splits.card], ['Transfer', receipt.payment_splits.transfer]] as [string, number][])
+                    .filter(([, v]) => Number(v) > 0)
+                    .map(([label, v]) => (
+                      <View key={label} style={s.rcptTotalRow}>
+                        <Text style={s.rcptMeta}>  {label}</Text>
+                        <Text style={s.rcptMeta}>₦{Number(v || 0).toLocaleString()}</Text>
+                      </View>
+                    ))}
+                </View>
+              )}
             </View>
           </ScrollView>
 
@@ -1243,6 +1451,16 @@ export default function CheckoutScreen() {
         onClose={() => setScannerOpen(false)}
         onScanned={handleBarcodeScanned}
       />
+
+      <PaymentModal
+        visible={payOpen}
+        onClose={() => setPayOpen(false)}
+        total={cart.total || 0}
+        processing={processing}
+        onConfirm={completeSale}
+      />
+
+      {renderHeldModal()}
     </View>
   );
 }
@@ -1449,4 +1667,40 @@ const s = StyleSheet.create({
   rcptBtnOutline:{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: R.md, borderWidth: 1, borderColor: C.accent },
   rcptBtnFill:   { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: R.md, backgroundColor: C.accent },
   rcptBtnText:   { fontSize: 15, fontWeight: '700' },
+
+  // Discount control
+  discountRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  discountLabel: { fontSize: 13, fontWeight: '600', color: C.ink, flex: 1 },
+  discountHint: { fontSize: 11, fontWeight: '500', color: C.muted },
+  discountInputWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 2,
+    paddingHorizontal: 12, height: 40, minWidth: 120,
+    backgroundColor: C.card, borderRadius: R.sm, borderWidth: 1, borderColor: C.border,
+  },
+  discountNaira: { fontSize: 14, color: C.muted },
+  discountInput: { flex: 1, fontSize: 14, fontWeight: '600', color: C.ink, textAlign: 'right', paddingVertical: 0 },
+
+  // Hold button
+  holdBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: 15, paddingHorizontal: 18, borderRadius: R.md,
+    borderWidth: 1, borderColor: C.border, backgroundColor: C.card,
+  },
+  holdLabel: { fontSize: 14, fontWeight: '700', color: C.ink },
+
+  // Resume-held trigger
+  heldTrigger: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8, marginBottom: 8 },
+  heldTriggerText: { fontSize: 13, fontWeight: '600', color: C.accent },
+
+  // Held sales modal
+  heldOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', paddingHorizontal: S.xl },
+  heldSheet: { backgroundColor: C.bg, borderRadius: R.lg, padding: S.lg, maxHeight: '70%' },
+  heldHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: S.md },
+  heldTitle: { fontSize: 16, fontWeight: '800', color: C.ink },
+  heldEmpty: { fontSize: 13, color: C.muted, textAlign: 'center', paddingVertical: 24 },
+  heldItem: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
+  heldItemLabel: { fontSize: 14, fontWeight: '600', color: C.ink },
+  heldItemSub: { fontSize: 11, color: C.muted, marginTop: 2 },
+  heldResumeBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: R.sm, borderWidth: 1, borderColor: C.accent },
+  heldResumeText: { fontSize: 12, fontWeight: '700', color: C.accent },
 });

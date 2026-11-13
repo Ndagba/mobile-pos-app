@@ -3,6 +3,9 @@ import {
   LayoutDashboard,
   ShoppingCart,
   History,
+  Banknote,
+  ScrollText,
+  Building2,
   Users,
   Package,
   Truck,
@@ -19,6 +22,7 @@ import {
   canManagePurchasing,
   canViewReports,
   canManageUsers,
+  canViewAuditLog,
   canManageSettings
 } from '@/lib/roles';
 
@@ -51,6 +55,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, matchPaths: ['/admin/dashboard'] },
       { label: 'New sale', href: '/sales', icon: ShoppingCart, shortcut: 'F2' },
       { label: 'Sales history', href: '/sales/history', icon: History, shortcut: 'F3' },
+      { label: 'Cash shifts', href: '/shifts', icon: Banknote },
       { label: 'Customers', href: '/customers', icon: Users }
     ]
   },
@@ -79,6 +84,8 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Admin',
     items: [
       { label: 'Users & roles', href: '/users', icon: UserCog, visible: canManageUsers },
+      { label: 'Branches', href: '/branches', icon: Building2, visible: canManageUsers },
+      { label: 'Audit log', href: '/admin/audit', icon: ScrollText, visible: canViewAuditLog },
       { label: 'Settings', href: '/settings', icon: Settings, visible: canManageSettings }
     ]
   }

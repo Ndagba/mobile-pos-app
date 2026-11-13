@@ -11,7 +11,7 @@ export interface Customer {
   total_spent: number;
   transaction_count: number;
   last_transaction_at?: string | null;
-  tag?: 'VIP' | 'New' | null;
+  tag?: string | null;
   tone?: string;
   payments?: { amount: number }[];
 }

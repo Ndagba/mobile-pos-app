@@ -8,5 +8,9 @@ module.exports = {
   ],
   testMatch: ['**/*.test.ts', '**/*.test.tsx'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
+  moduleNameMapper: {
+    '^@jaypos/shared$': '<rootDir>/../shared/src/index.ts',
+    '^@jaypos/shared/(.*)$': '<rootDir>/../shared/src/$1'
+  },
   setupFiles: []
 };

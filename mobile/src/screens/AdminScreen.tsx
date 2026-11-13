@@ -52,6 +52,20 @@ export default function AdminScreen() {
           color="#10B981"
           onPress={() => navigation.navigate('StockCounts')}
         />
+        <AdminMenuItem
+          icon="calendar-clock"
+          title="Batches & Expiry"
+          description="See batches expiring soon or expired, and add new batches"
+          color="#F59E0B"
+          onPress={() => navigation.navigate('Batches')}
+        />
+        <AdminMenuItem
+          icon="rotate-3d-variant"
+          title="Inventory Turnover"
+          description="Units sold and turnover ratio per product over a period"
+          color="#0EA5E9"
+          onPress={() => navigation.navigate('InventoryTurnover')}
+        />
         
         <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Shift Management</Text>
         <AdminMenuItem
@@ -76,6 +90,13 @@ export default function AdminScreen() {
         )}
 
         <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Reports & Logs</Text>
+        <AdminMenuItem
+          icon="chart-line"
+          title="Profit & Loss"
+          description="Revenue, cost of goods, operating expenses and net profit by branch"
+          color="#6E56F7"
+          onPress={() => navigation.navigate('ProfitLoss')}
+        />
         <AdminMenuItem
           icon="file-document-outline"
           title="End of Day (EOD) Reports"

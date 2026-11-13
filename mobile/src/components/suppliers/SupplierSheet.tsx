@@ -20,6 +20,8 @@ interface SupplierSheetProps {
   onLedger?: (supplier: Supplier) => void;
   onEdit?: (supplier: Supplier) => void;
   onNewInvoice?: (supplier: Supplier) => void;
+  /** Raise a purchase order for this supplier (shown to admin/manager only, via `canEdit`). */
+  onNewOrder?: (supplier: Supplier) => void;
   onDelete?: (supplier: Supplier) => void;
   canEdit?: boolean;
 }
@@ -31,6 +33,7 @@ export default function SupplierSheet({
   onLedger,
   onEdit,
   onNewInvoice,
+  onNewOrder,
   onDelete,
   canEdit = true,
 }: SupplierSheetProps) {
@@ -95,6 +98,14 @@ export default function SupplierSheet({
       label: 'Invoice',
       onPress: () => { onNewInvoice?.(supplier); onClose(); },
     },
+    ...(canEdit && onNewOrder ? [
+      {
+        key: 'order',
+        icon: 'clipboard-plus-outline',
+        label: 'Order',
+        onPress: () => { onNewOrder(supplier); onClose(); },
+      },
+    ] : []),
     ...(canEdit ? [
       {
         key: 'edit',
@@ -267,13 +278,14 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: C.border,
-    padding: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
   },
   actionLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     color: C.ink,
     textAlign: 'center',

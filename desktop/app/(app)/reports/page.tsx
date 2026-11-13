@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { BarChart3, TrendingUp, Package, Users, Wallet, AlertCircle, Landmark } from 'lucide-react';
+import { BarChart3, TrendingUp, Package, Users, Wallet, AlertCircle, Landmark, CalendarCheck, Undo2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 
@@ -49,6 +49,20 @@ export default function ReportsPage() {
       href: '/reports/discounts',
       icon: Wallet,
       color: 'text-amber-500',
+    },
+    {
+      title: 'End of Day',
+      description: 'Daily sales by payment method, with voided totals.',
+      href: '/reports/eod',
+      icon: CalendarCheck,
+      color: 'text-teal-500',
+    },
+    {
+      title: 'Voids & Refunds',
+      description: 'Every reversed sale: who rang it up, who reversed it and why.',
+      href: '/reports/voids',
+      icon: Undo2,
+      color: 'text-rose-500',
     },
   ];
 

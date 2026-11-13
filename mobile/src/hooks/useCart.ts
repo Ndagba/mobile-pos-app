@@ -1,4 +1,5 @@
 import { useSelector, useDispatch } from 'react-redux';
+import type { PaymentMethod } from '@jaypos/shared';
 import { RootState } from '../redux/store';
 import * as cartActions from '../redux/slices/cartSlice';
 
@@ -18,7 +19,7 @@ export function useCart() {
     removeItem: (productId: string) => dispatch(cartActions.removeItem(productId)),
     updateQuantity: (productId: string, quantity: number) =>
       dispatch(cartActions.updateQuantity({ product_id: productId, quantity })),
-    setPaymentMethod: (method: 'cash' | 'card' | 'mobile_wallet') =>
+    setPaymentMethod: (method: PaymentMethod) =>
       dispatch(cartActions.setPaymentMethod(method)),
     clear: () => dispatch(cartActions.clearCart())
   };

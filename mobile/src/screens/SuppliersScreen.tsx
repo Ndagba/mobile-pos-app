@@ -210,6 +210,12 @@ export default function SuppliersScreen() {
     if (s) setTimeout(() => navigation.navigate('SupplierLedger', { supplier_id: s.id, supplier: s, openInvoiceForm: true }), 320);
   };
 
+  const handleSheetNewOrder = () => {
+    const s = sheetSupplier;
+    handleSheetClose();
+    if (s) setTimeout(() => navigation.navigate('PurchaseOrderNew', { supplier_id: s.id }), 320);
+  };
+
   const handleSheetEdit = () => {
     const s = sheetSupplier;
     handleSheetClose();
@@ -339,6 +345,20 @@ export default function SuppliersScreen() {
           <Text style={styles.eyebrow}>Suppliers</Text>
           <Text style={styles.title}>Directory</Text>
         </View>
+        {/* Purchasing (PO → receive → stock-in) — admin/manager only, same as desktop */}
+        {!isCashier && (
+          <TouchableOpacity
+            style={styles.purchasingBtn}
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('Purchasing')}
+            accessibilityRole="button"
+            accessibilityLabel="Purchase orders"
+          >
+            <MaterialCommunityIcons name="clipboard-text-outline" size={16} color={C.accent} />
+            <Text style={styles.purchasingBtnText}>Purchase orders</Text>
+            <MaterialCommunityIcons name="chevron-right" size={16} color={C.accent} />
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Hero Card */}
@@ -406,6 +426,7 @@ export default function SuppliersScreen() {
         onClose={handleSheetClose}
         onLedger={handleSheetLedger}
         onNewInvoice={handleSheetNewInvoice}
+        onNewOrder={handleSheetNewOrder}
         onEdit={handleSheetEdit}
         onDelete={handleSheetDelete}
         canEdit={!isCashier}
@@ -598,6 +619,19 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   headerLeft: { flex: 1 },
+  purchasingBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: C.violetBg,
+    borderWidth: 1,
+    borderColor: C.accent,
+  },
+  purchasingBtnText: { fontSize: 13, fontWeight: '700', color: C.accent },
   eyebrow: { fontSize: 13, fontWeight: '500', color: C.muted, marginBottom: 2 },
   title: { fontSize: 26, fontWeight: '800', color: C.ink, letterSpacing: -0.02 },
   searchContainer: {

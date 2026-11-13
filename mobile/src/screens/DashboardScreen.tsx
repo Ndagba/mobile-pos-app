@@ -6,6 +6,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useAlerts } from '../hooks/useAlerts';
 import { useSelector } from 'react-redux';
 import Svg, { Polyline, Polygon, Defs, LinearGradient as SvgGradient, Stop } from 'react-native-svg';
 import { RootState } from '../redux/store';
@@ -157,10 +158,23 @@ const sh = StyleSheet.create({
 });
 
 // ─── IconBtn ─────────────────────────────────────────────────
-function IconBtn({ icon, onPress }: { icon: string; onPress?: () => void }) {
+function IconBtn({
+  icon, onPress, badge, label,
+}: { icon: string; onPress?: () => void; badge?: number; label?: string }) {
   return (
-    <TouchableOpacity onPress={onPress} style={ib.btn} activeOpacity={0.7}>
+    <TouchableOpacity
+      onPress={onPress}
+      style={ib.btn}
+      activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={label ? (badge ? `${label}, ${badge} new` : label) : undefined}
+    >
       <MaterialCommunityIcons name={icon as any} size={20} color={C.ink} />
+      {!!badge && badge > 0 && (
+        <View style={ib.badge}>
+          <Text style={ib.badgeText}>{badge > 9 ? '9+' : badge}</Text>
+        </View>
+      )}
     </TouchableOpacity>
   );
 }
@@ -170,11 +184,18 @@ const ib = StyleSheet.create({
     backgroundColor: C.card, borderWidth: 1, borderColor: C.border,
     alignItems: 'center', justifyContent: 'center',
   },
+  badge: {
+    position: 'absolute', top: -4, right: -4, minWidth: 18, height: 18, borderRadius: 9,
+    paddingHorizontal: 4, backgroundColor: C.red, alignItems: 'center', justifyContent: 'center',
+  },
+  badgeText: { fontSize: 10, fontWeight: '800', color: '#FFFFFF' },
 });
 
 // ─── Main Screen ──────────────────────────────────────────────
 export default function DashboardScreen() {
   const navigation = useNavigation();
+  // Bell badge: pending syncs, plus stock / expiry alerts for admins and managers.
+  const { alerts } = useAlerts();
   const auth  = useSelector((state: RootState) => state.auth);
   const sync  = useSelector((state: RootState) => state.sync);
   const isAdmin = ['admin', 'manager'].includes(auth.user?.role ?? '');
@@ -271,7 +292,12 @@ export default function DashboardScreen() {
           <Text style={s.headerDate}>{today}{isCashier ? ' · Your sales only' : ''}</Text>
           <Text style={s.headerGreet}>{greet()}, {auth.user?.first_name ?? 'there'} 👋</Text>
         </View>
-        <IconBtn icon="bell-outline" />
+        <IconBtn
+          icon="bell-outline"
+          label="Alerts"
+          badge={alerts.length}
+          onPress={() => (navigation as any).navigate('Alerts')}
+        />
       </View>
 
       {/* ── Hero gradient card ──────────────────────────────── */}

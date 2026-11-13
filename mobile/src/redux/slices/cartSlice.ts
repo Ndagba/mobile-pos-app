@@ -1,4 +1,5 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import type { PaymentMethod, SplitPaymentAllocations } from '@jaypos/shared';
 
 export interface CartItem {
   product_id: string;
@@ -18,7 +19,9 @@ export interface CartState {
   discount_amount: number;
   total: number;
   customer_id: string | null;
-  payment_method: 'cash' | 'card' | 'mobile_wallet' | null;
+  // Shared payment model: 'cash' | 'card' | 'transfer' | 'split' (matches desktop + backend).
+  payment_method: PaymentMethod | null;
+  payment_splits: SplitPaymentAllocations | null;
   offline_session_hash: string | null;
   is_processing: boolean;
 }
@@ -31,6 +34,7 @@ const initialState: CartState = {
   total: 0,
   customer_id: null,
   payment_method: null,
+  payment_splits: null,
   offline_session_hash: null,
   is_processing: false
 };
@@ -68,8 +72,11 @@ const cartSlice = createSlice({
     setCustomer: (state, action: PayloadAction<string>) => {
       state.customer_id = action.payload;
     },
-    setPaymentMethod: (state, action: PayloadAction<'cash' | 'card' | 'mobile_wallet'>) => {
+    setPaymentMethod: (state, action: PayloadAction<PaymentMethod>) => {
       state.payment_method = action.payload;
+    },
+    setPaymentSplits: (state, action: PayloadAction<SplitPaymentAllocations | null>) => {
+      state.payment_splits = action.payload;
     },
     setProcessing: (state, action: PayloadAction<boolean>) => {
       state.is_processing = action.payload;
@@ -85,6 +92,7 @@ const cartSlice = createSlice({
       state.total = 0;
       state.customer_id = null;
       state.payment_method = null;
+      state.payment_splits = null;
       state.offline_session_hash = null;
       state.is_processing = false;
     },
@@ -106,6 +114,7 @@ export const {
   setDiscount,
   setCustomer,
   setPaymentMethod,
+  setPaymentSplits,
   setProcessing,
   setOfflineSessionHash,
   clearCart,

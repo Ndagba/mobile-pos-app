@@ -25,7 +25,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RootState } from '../redux/store';
 import { logout, enableBiometric, disableBiometric } from '../redux/slices/authSlice';
-import { setStoreSettings } from '../redux/slices/settingsSlice';
+import { setStoreSettings, normalizeStoreSettings } from '../redux/slices/settingsSlice';
 import ApiClient from '../services/ApiClient';
 import DatabaseService from '../services/DatabaseService';
 import { SyncManager } from '../services/SyncManager';
@@ -177,6 +177,16 @@ export default function SettingsScreen() {
   const [businessName, setBusinessName] = useState('');
   const [receiptFooter, setReceiptFooter] = useState('');
   const [savingBiz, setSavingBiz] = useState(false);
+  // Store profile + receipt + cashier sales rules — the same server-side
+  // `/settings` row the desktop Settings page edits.
+  const [rcNumber, setRcNumber] = useState('');
+  const [storeAddress, setStoreAddress] = useState('');
+  const [taxRate, setTaxRate] = useState('');
+  const [showLogo, setShowLogo] = useState(true);
+  const [allowDiscount, setAllowDiscount] = useState(true);
+  const [allowRefund, setAllowRefund] = useState(false);
+  const [maxDiscount, setMaxDiscount] = useState('');
+  const [savingMaxDiscount, setSavingMaxDiscount] = useState(false);
 
   // Inventory settings
   const [lowStockThreshold, setLowStockThreshold] = useState('10');
@@ -312,25 +322,82 @@ export default function SettingsScreen() {
   const loadStoreSettings = async () => {
     try {
       const res: any = await ApiClient.get('/settings');
-      const data = res?.data ?? res;
-      const addCust = data?.allow_cashier_add_customers ?? true;
-      const editCust = data?.allow_cashier_edit_customers ?? true;
-      const custMenu = data?.customer_menu_enabled ?? true;
-      const suppMenu = data?.supplier_menu_enabled ?? true;
+      const s = normalizeStoreSettings(res?.data ?? res);
 
-      setAllowCashierAdd(addCust);
-      setAllowCashierEdit(editCust);
-      setCustomerMenuEnabled(custMenu);
-      setSupplierMenuEnabled(suppMenu);
+      setAllowCashierAdd(s.allow_cashier_add_customers);
+      setAllowCashierEdit(s.allow_cashier_edit_customers);
+      setCustomerMenuEnabled(s.customer_menu_enabled);
+      setSupplierMenuEnabled(s.supplier_menu_enabled);
 
-      dispatch(setStoreSettings({
-        allow_cashier_add_customers: addCust,
-        allow_cashier_edit_customers: editCust,
-        customer_menu_enabled: custMenu,
-        supplier_menu_enabled: suppMenu,
-      }));
+      // Server values win; a blank server value keeps whatever this device had
+      // saved locally before the store profile existed, so saving migrates it.
+      setBusinessName(prev => s.business_name ?? prev);
+      setReceiptFooter(prev => s.receipt_footer ?? prev);
+      setRcNumber(s.rc_number ?? '');
+      setStoreAddress(s.store_address ?? '');
+      setTaxRate(s.tax_rate != null ? String(s.tax_rate) : '');
+      setShowLogo(s.receipt_show_logo ?? true);
+      setAllowDiscount(s.allow_cashier_discount ?? true);
+      setAllowRefund(s.allow_cashier_refund ?? false);
+      setMaxDiscount(s.max_discount_percent != null ? String(s.max_discount_percent) : '');
+
+      dispatch(setStoreSettings(s));
     } catch (e) {
       console.warn('Store settings load error:', e);
+    }
+  };
+
+  // PATCH /settings and adopt the server's row. `ApiClient.patch` echoes the
+  // request body when offline (and never replays it), so refuse up-front and
+  // reject a response that isn't a real settings row instead of showing "saved".
+  const patchStoreSettings = async (payload: Record<string, unknown>) => {
+    if (!ApiClient.getOnlineStatus()) {
+      throw new Error('You are offline. Store settings can only be changed while connected.');
+    }
+    const res: any = await ApiClient.patch('/settings', payload);
+    const row = res?.data ?? res;
+    if (!row || typeof row !== 'object' || !row.store_id) {
+      throw new Error('You are offline. Store settings can only be changed while connected.');
+    }
+    const s = normalizeStoreSettings(row);
+    dispatch(setStoreSettings(s));
+    return s;
+  };
+
+  const settingsError = (e: any, fallback: string) =>
+    e?.response?.data?.message ?? e?.message ?? fallback;
+
+  const toggleStoreFlag = async (
+    key: 'allow_cashier_discount' | 'allow_cashier_refund' | 'receipt_show_logo',
+    current: boolean,
+    setLocal: (v: boolean) => void,
+  ) => {
+    const next = !current;
+    setLocal(next);
+    try {
+      await patchStoreSettings({ [key]: next });
+    } catch (e: any) {
+      setLocal(current);
+      Alert.alert('Error', settingsError(e, 'Failed to update setting.'));
+    }
+  };
+
+  const handleSaveMaxDiscount = async () => {
+    const raw = maxDiscount.trim();
+    const n = raw === '' ? null : Math.round(Number(raw));
+    if (n !== null && (!Number.isFinite(n) || n < 0 || n > 100)) {
+      Alert.alert('Invalid Value', 'Enter a percentage from 0 to 100, or leave blank for no limit.');
+      return;
+    }
+    setSavingMaxDiscount(true);
+    try {
+      const s = await patchStoreSettings({ max_discount_percent: n });
+      setMaxDiscount(s.max_discount_percent != null ? String(s.max_discount_percent) : '');
+      Alert.alert('Saved', n === null ? 'Cashier discounts are no longer capped.' : `Cashiers can discount up to ${n}% of the subtotal.`);
+    } catch (e: any) {
+      Alert.alert('Error', settingsError(e, 'Could not save the discount limit.'));
+    } finally {
+      setSavingMaxDiscount(false);
     }
   };
 
@@ -436,8 +503,10 @@ export default function SettingsScreen() {
           AsyncStorage.getItem(NOTIF_DAILY_KEY),
           AsyncStorage.getItem(AUTO_SYNC_KEY),
         ]);
-      setBusinessName(name ?? '');
-      setReceiptFooter(footer ?? '');
+      // Legacy device-local values only fill a blank — the store profile from
+      // the server (loadStoreSettings) takes precedence whichever loads first.
+      setBusinessName(prev => prev || (name ?? ''));
+      setReceiptFooter(prev => prev || (footer ?? ''));
       setLowStockThreshold(threshold ?? '10');
       setNotifLowStock(lowStockN === null ? true : lowStockN !== 'false');
       setNotifSale(saleN === 'true');
@@ -539,15 +608,35 @@ export default function SettingsScreen() {
 
   // ── Business settings ────────────────────────────────────────
   const handleSaveBizSettings = async () => {
+    const rawTax = taxRate.trim();
+    const tax = rawTax === '' ? null : Number(rawTax);
+    if (tax !== null && (!Number.isFinite(tax) || tax < 0 || tax > 100)) {
+      Alert.alert('Invalid Value', 'VAT rate must be between 0 and 100.');
+      return;
+    }
     setSavingBiz(true);
     try {
+      // Saved to the store (shared with desktop and every device), not just this phone.
+      const s = await patchStoreSettings({
+        business_name: businessName.trim() || null,
+        rc_number: rcNumber.trim() || null,
+        store_address: storeAddress.trim() || null,
+        tax_rate: tax,
+        receipt_footer: receiptFooter.trim() || null,
+      });
+      setBusinessName(s.business_name ?? '');
+      setRcNumber(s.rc_number ?? '');
+      setStoreAddress(s.store_address ?? '');
+      setTaxRate(s.tax_rate != null ? String(s.tax_rate) : '');
+      setReceiptFooter(s.receipt_footer ?? '');
+      // Keep the legacy local copy in step so an offline receipt still has it.
       await Promise.all([
-        AsyncStorage.setItem(BIZ_NAME_KEY, businessName.trim()),
-        AsyncStorage.setItem(RECEIPT_FOOTER_KEY, receiptFooter.trim()),
-      ]);
-      Alert.alert('Saved', 'Business settings updated successfully.');
-    } catch {
-      Alert.alert('Error', 'Failed to save settings.');
+        AsyncStorage.setItem(BIZ_NAME_KEY, s.business_name ?? ''),
+        AsyncStorage.setItem(RECEIPT_FOOTER_KEY, s.receipt_footer ?? ''),
+      ]).catch(() => {});
+      Alert.alert('Saved', 'Store profile and receipt settings updated.');
+    } catch (e: any) {
+      Alert.alert('Error', settingsError(e, 'Failed to save settings.'));
     } finally {
       setSavingBiz(false);
     }
@@ -1031,6 +1120,24 @@ export default function SettingsScreen() {
           </View>
         </LinearGradient>
 
+        {/* Profile: account details + change own password (same as desktop /profile) */}
+        <TouchableOpacity
+          style={[styles.card, styles.toggleRow, { marginTop: 12 }]}
+          onPress={() => navigation.navigate('Profile')}
+          activeOpacity={0.75}
+          accessibilityRole="button"
+          accessibilityLabel="Profile and password"
+        >
+          <View style={[styles.toggleIcon, { backgroundColor: C.accent + '1A' }]}>
+            <MaterialCommunityIcons name="account-circle-outline" size={18} color={C.accent} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.toggleLabel}>Profile & password</Text>
+            <Text style={styles.toggleDesc}>Your account details and password</Text>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={20} color={C.muted} />
+        </TouchableOpacity>
+
         {/* ── Quick stats grid ── */}
         <View style={styles.statsRow}>
           {/* Staff */}
@@ -1456,6 +1563,84 @@ export default function SettingsScreen() {
           </>
         )}
 
+        {/* ══════════ SALES PERMISSIONS (cashiers) ══════════ */}
+        {canManageStaff && (
+          <>
+            <SectionHeader label="Sales Permissions (Cashiers)" />
+
+            <View style={[styles.card, { padding: 4, marginBottom: 14 }]}>
+              <View style={[styles.toggleRow, styles.rowDivider]}>
+                <View style={[styles.toggleIcon, { backgroundColor: C.accent + '1A' }]}>
+                  <MaterialCommunityIcons name="tag-outline" size={18} color={C.accent} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.toggleLabel}>Cashiers can give discounts</Text>
+                  <Text style={styles.toggleDesc}>
+                    Allow cashier accounts to apply a discount at checkout
+                  </Text>
+                </View>
+                <Toggle
+                  value={allowDiscount}
+                  onValueChange={() => toggleStoreFlag('allow_cashier_discount', allowDiscount, setAllowDiscount)}
+                />
+              </View>
+
+              <View style={[styles.toggleRow, styles.rowDivider]}>
+                <View style={[styles.toggleIcon, { backgroundColor: C.amber + '1A' }]}>
+                  <MaterialCommunityIcons name="cash-refund" size={18} color={C.amber} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.toggleLabel}>Cashiers can refund sales</Text>
+                  <Text style={styles.toggleDesc}>
+                    Allow cashier accounts to refund a completed sale
+                  </Text>
+                </View>
+                <Toggle
+                  value={allowRefund}
+                  onValueChange={() => toggleStoreFlag('allow_cashier_refund', allowRefund, setAllowRefund)}
+                />
+              </View>
+
+              <View style={{ paddingHorizontal: 12, paddingVertical: 12 }}>
+                <TextInput
+                  label="Max cashier discount"
+                  value={maxDiscount}
+                  onChangeText={(v) => setMaxDiscount(v.replace(/[^0-9]/g, ''))}
+                  mode="outlined"
+                  dense
+                  style={styles.input}
+                  keyboardType="number-pad"
+                  left={<TextInput.Icon icon="percent-outline" />}
+                  right={<TextInput.Affix text="% of subtotal" />}
+                  placeholder="No limit"
+                  editable={allowDiscount}
+                  outlineColor={C.border}
+                  activeOutlineColor={C.accent}
+                  theme={{ colors: { background: C.card } }}
+                />
+                <Text style={[styles.toggleDesc, { marginBottom: 12, lineHeight: 18 }]}>
+                  Leave blank for no limit. Admins and managers are never limited.
+                </Text>
+                <TouchableOpacity
+                  style={[styles.solidBtn, savingMaxDiscount && { opacity: 0.6 }]}
+                  onPress={handleSaveMaxDiscount}
+                  disabled={savingMaxDiscount}
+                  activeOpacity={0.8}
+                >
+                  {savingMaxDiscount ? (
+                    <ActivityIndicator size="small" color={C.bg} />
+                  ) : (
+                    <>
+                      <MaterialCommunityIcons name="content-save-outline" size={16} color={C.bg} />
+                      <Text style={styles.solidBtnText}>Save Discount Limit</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </>
+        )}
+
         {/* ══════════ BRANCH MANAGEMENT (admin only) ══════════ */}
         {isAdmin && (
           <>
@@ -1716,9 +1901,12 @@ export default function SettingsScreen() {
         {/* ══════════ RECEIPT SETTINGS ══════════ */}
         {canManageStaff && (
           <>
-            <SectionHeader label="Receipt Settings" />
+            <SectionHeader label="Store Profile & Receipt" />
 
             <View style={[styles.card, { padding: 16, marginBottom: 14 }]}>
+              <Text style={[styles.toggleDesc, { marginBottom: 12, lineHeight: 18 }]}>
+                Saved for the whole store — printed on receipts from every device, including the desktop app.
+              </Text>
               <TextInput
                 label="Business Name"
                 value={businessName}
@@ -1727,6 +1915,46 @@ export default function SettingsScreen() {
                 dense
                 style={styles.input}
                 left={<TextInput.Icon icon="store-outline" />}
+                outlineColor={C.border}
+                activeOutlineColor={C.accent}
+                theme={{ colors: { background: C.card } }}
+              />
+              <TextInput
+                label="RC Number"
+                value={rcNumber}
+                onChangeText={setRcNumber}
+                mode="outlined"
+                dense
+                style={styles.input}
+                left={<TextInput.Icon icon="card-account-details-outline" />}
+                placeholder="RC 1234567"
+                outlineColor={C.border}
+                activeOutlineColor={C.accent}
+                theme={{ colors: { background: C.card } }}
+              />
+              <TextInput
+                label="Address"
+                value={storeAddress}
+                onChangeText={setStoreAddress}
+                mode="outlined"
+                dense
+                style={styles.input}
+                left={<TextInput.Icon icon="map-marker-outline" />}
+                outlineColor={C.border}
+                activeOutlineColor={C.accent}
+                theme={{ colors: { background: C.card } }}
+              />
+              <TextInput
+                label="VAT Rate"
+                value={taxRate}
+                onChangeText={(v) => setTaxRate(v.replace(/[^0-9.]/g, ''))}
+                mode="outlined"
+                dense
+                style={styles.input}
+                keyboardType="decimal-pad"
+                left={<TextInput.Icon icon="percent-outline" />}
+                right={<TextInput.Affix text="%" />}
+                placeholder="7.5"
                 outlineColor={C.border}
                 activeOutlineColor={C.accent}
                 theme={{ colors: { background: C.card } }}
@@ -1768,6 +1996,24 @@ export default function SettingsScreen() {
                   </>
                 )}
               </TouchableOpacity>
+            </View>
+
+            <View style={[styles.card, { padding: 4, marginBottom: 14 }]}>
+              <View style={styles.toggleRow}>
+                <View style={[styles.toggleIcon, { backgroundColor: C.accent + '1A' }]}>
+                  <MaterialCommunityIcons name="image-outline" size={18} color={C.accent} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.toggleLabel}>Show store logo on receipts</Text>
+                  <Text style={styles.toggleDesc}>
+                    Applies to printed receipts from the desktop app
+                  </Text>
+                </View>
+                <Toggle
+                  value={showLogo}
+                  onValueChange={() => toggleStoreFlag('receipt_show_logo', showLogo, setShowLogo)}
+                />
+              </View>
             </View>
           </>
         )}

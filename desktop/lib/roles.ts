@@ -60,6 +60,15 @@ export function canManageUsers(user: RoleBearer): boolean {
   return isAdmin(user);
 }
 
+/**
+ * Admin or manager: may read the audit log. Matches mobile, where Audit Logs sits
+ * on the Admin tab (admin + manager). The backend scopes `/audit` to the caller's
+ * branches but has no role check of its own, so this is the gate.
+ */
+export function canViewAuditLog(user: RoleBearer): boolean {
+  return user?.role === 'admin' || user?.role === 'manager' || !!user?.is_super_admin;
+}
+
 /** Admin or manager: Settings access (keep current check — not admin-only). */
 export function canManageSettings(user: RoleBearer): boolean {
   return user?.role === 'admin' || user?.role === 'manager' || !!user?.is_super_admin;

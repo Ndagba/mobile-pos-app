@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect } from 'react';
+import { cashierDiscountRule, clampDiscount } from '@jaypos/shared';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useCartStore, useCartTotals } from '@/store/cartStore';
@@ -9,7 +11,8 @@ import { useSettings } from '@/hooks/useSettings';
 /**
  * Flat store-level discount (₦), applied to the total after tax. For cashiers the
  * discount can be disabled (`allow_cashier_discount`) or capped to a share of the
- * subtotal (`max_discount_percent`); admins/managers are never limited.
+ * subtotal (`max_discount_percent`); admins/managers are never limited. The rule
+ * itself lives in `@jaypos/shared` so mobile applies exactly the same limits.
  */
 export function DiscountField() {
   const discount = useCartStore((s) => s.discount_amount);
@@ -18,15 +21,20 @@ export function DiscountField() {
   const user = useAuthStore((s) => s.user);
   const { settings } = useSettings();
 
-  const isCashier = user?.role === 'cashier' && !user?.is_super_admin;
-  const allowed = !isCashier || settings?.allow_cashier_discount !== false;
-  const maxPct = isCashier ? settings?.max_discount_percent ?? null : null;
-  const cap = maxPct != null ? (totals.subtotal * maxPct) / 100 : Infinity;
+  const rule = cashierDiscountRule(user, settings, totals.subtotal);
+  const { allowed, maxPercent: maxPct } = rule;
 
   const onChange = (raw: string) => {
-    const v = Math.max(0, parseFloat(raw) || 0);
-    setDiscount(Math.min(v, cap));
+    setDiscount(clampDiscount(parseFloat(raw) || 0, rule));
   };
+
+  // Keep an existing discount inside the cap when the cart shrinks, a held sale
+  // is resumed, or the store settings change underneath it.
+  useEffect(() => {
+    const clamped = clampDiscount(discount, rule);
+    if (clamped !== discount) setDiscount(clamped);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [discount, rule.allowed, rule.cap]);
 
   return (
     <div className="flex items-center justify-between gap-3">

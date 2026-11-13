@@ -11,7 +11,7 @@ import { useFocusEffect, useRoute, useNavigation } from '@react-navigation/nativ
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import { LinearGradient } from 'expo-linear-gradient';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getReceiptBranding } from '../utils/receiptBranding';
 import ApiClient from '../services/ApiClient';
 import { C } from '../theme';
 import { RootState } from '../redux/store';
@@ -56,6 +56,7 @@ export default function SupplierLedgerScreen() {
   const navigation = useNavigation<any>();
   const insets     = useSafeAreaInsets();
   const user       = useSelector((state: RootState) => state.auth.user);
+  const storeSettings = useSelector((state: RootState) => state.settings.settings);
 
   const supplierId      = (route.params as any)?.supplier_id;
   const initialSupplier = (route.params as any)?.supplier as Supplier | undefined;
@@ -196,10 +197,9 @@ export default function SupplierLedgerScreen() {
 
   const sharePayment = async (pay: SupplierPayment) => {
     try {
-      const bizName = await AsyncStorage.getItem('@pos_business_name') || '';
-      const footerMsg = await AsyncStorage.getItem('@pos_receipt_footer') || '';
+      const { headerLines, footer: footerMsg } = await getReceiptBranding(storeSettings);
       const text = [
-        bizName ? bizName : '',
+        ...headerLines,
         '===== PAYMENT RECEIPT =====',
         `Supplier:    ${supplier?.name ?? ''}`,
         `Date:        ${fmtDate(pay.date)}`,

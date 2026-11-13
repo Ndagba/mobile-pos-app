@@ -50,6 +50,8 @@ export class SyncManager {
         discount_amount: tx.discount_amount,
         total_amount: tx.total_amount,
         payment_method: tx.payment_method,
+        // Keep split allocations when draining offline sales on reconnect.
+        payment_splits: tx.payment_splits,
         items: Array.isArray(tx.items) ? tx.items : Array.from(tx.items as Iterable<any>)
       }));
 

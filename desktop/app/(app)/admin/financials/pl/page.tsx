@@ -15,6 +15,7 @@ import {
   buildInsights,
   pctChange,
   safeDiv,
+  dayBoundsIso,
   type PLData,
   type PLDerived,
   type Insight,
@@ -91,7 +92,11 @@ function presetRange(p: Exclude<Preset, 'custom'>): { start: string; end: string
 }
 
 async function fetchPL(branchId: string, start: string, end: string): Promise<PLData> {
-  const p = new URLSearchParams({ branchId, startDate: start, endDate: end });
+  // Whole local days: a bare `endDate=YYYY-MM-DD` is parsed server-side as midnight
+  // at the START of that day, which drops every sale made on the last day of the
+  // range (and made "Today" always empty). Mobile sends the same bounds.
+  const { startDate, endDate } = dayBoundsIso(start, end);
+  const p = new URLSearchParams({ branchId, startDate, endDate });
   return apiClient.get<PLData>(`/financials/pl?${p.toString()}`);
 }
 

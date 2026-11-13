@@ -48,6 +48,11 @@ interface SectionData {
   data: FilteredCustomer[];
 }
 
+// Tags are free text on the server; desktop writes lowercase (regular / vip /
+// wholesale) and older mobile builds wrote 'VIP' / 'New' — compare ignoring case.
+const tagIs = (tag: string | null | undefined, want: string) => (tag ?? '').toLowerCase() === want;
+const TAG_LABELS: Record<string, string> = { regular: 'Regular', vip: 'VIP', wholesale: 'Wholesale', new: 'New' };
+
 export default function CustomersScreen() {
   const insets = useSafeAreaInsets();
   const dispatch = useDispatch();
@@ -60,8 +65,13 @@ export default function CustomersScreen() {
   const minTouchTarget = responsiveMinTouchTarget(deviceType);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState<'all' | 'vip' | 'new'>('all');
+  const [filter, setFilter] = useState<'all' | 'vip' | 'wholesale' | 'new'>('all');
   const [outstandingTotal, setOutstandingTotal] = useState(0);
+  // Store-wide figures from `GET /customers/summary` (what the desktop Customers
+  // page shows). Null until loaded / when offline → fall back to the local list.
+  const [summary, setSummary] = useState<{
+    total: number; vips: number; active30d: number; lifetimeSpend: number; outstanding: number;
+  } | null>(null);
   const [allowCashierAdd, setAllowCashierAdd] = useState(true);
   const [allowCashierEdit, setAllowCashierEdit] = useState(true);
   const [sheetCustomer, setSheetCustomer] = useState<FilteredCustomer | null>(null);
@@ -92,8 +102,28 @@ export default function CustomersScreen() {
       loadCustomers();
       loadStoreSettings();
       loadOutstanding();
+      loadSummary();
     }, [])
   );
+
+  const loadSummary = async () => {
+    if (!ApiClient.getOnlineStatus()) return;
+    try {
+      const res: any = await ApiClient.get('/customers/summary');
+      const d = res?.data ?? res;
+      if (d && typeof d === 'object' && d.total !== undefined) {
+        setSummary({
+          total: Number(d.total) || 0,
+          vips: Number(d.vips) || 0,
+          active30d: Number(d.active30d) || 0,
+          lifetimeSpend: Number(d.lifetimeSpend) || 0,
+          outstanding: Number(d.outstanding) || 0,
+        });
+      }
+    } catch {
+      // keep the locally-computed figures
+    }
+  };
 
   const loadOutstanding = async () => {
     // SWR-style: show cached value instantly, refresh in background.
@@ -165,8 +195,9 @@ export default function CustomersScreen() {
   const filtered = useMemo(() => {
     return customersWithTone.filter(c => {
       // Filter by tag
-      if (filter === 'vip' && c.tag !== 'VIP') return false;
-      if (filter === 'new' && c.tag !== 'New') return false;
+      if (filter === 'vip' && !tagIs(c.tag, 'vip')) return false;
+      if (filter === 'wholesale' && !tagIs(c.tag, 'wholesale')) return false;
+      if (filter === 'new' && !tagIs(c.tag, 'new')) return false;
 
       // Filter by search query
       if (searchQuery.trim()) {
@@ -200,7 +231,7 @@ export default function CustomersScreen() {
 
   // ─── Stats for hero card ────────────────────────────────────
   const stats = useMemo(() => {
-    const vipCount = customersWithTone.filter(c => c.tag === 'VIP').length;
+    const vipCount = customersWithTone.filter(c => tagIs(c.tag, 'vip')).length;
     const active30d = customersWithTone.filter(c => {
       if (!c.last_transaction_at) return false;
       const lastDate = new Date(c.last_transaction_at);
@@ -209,14 +240,16 @@ export default function CustomersScreen() {
     }).length;
     const lifetimeSpend = customersWithTone.reduce((sum, c) => sum + (Number(c.total_spent) || 0), 0);
 
+    // Prefer the server's store-wide summary (not capped at the 200 customers
+    // loaded here); fall back to the local list when it isn't available.
     return {
-      totalCount: customersWithTone.length,
-      vipCount,
-      active30dCount: active30d,
-      lifetimeSpend,
+      totalCount: summary?.total ?? customersWithTone.length,
+      vipCount: summary?.vips ?? vipCount,
+      active30dCount: summary?.active30d ?? active30d,
+      lifetimeSpend: summary?.lifetimeSpend ?? lifetimeSpend,
       outstandingTotal,
     };
-  }, [customersWithTone, outstandingTotal]);
+  }, [customersWithTone, outstandingTotal, summary]);
 
   // ─── Filter chips ───────────────────────────────────────────
   const filterChips = [
@@ -224,12 +257,17 @@ export default function CustomersScreen() {
     {
       key: 'vip',
       label: '⭐ VIP',
-      count: customersWithTone.filter(c => c.tag === 'VIP').length,
+      count: customersWithTone.filter(c => tagIs(c.tag, 'vip')).length,
+    },
+    {
+      key: 'wholesale',
+      label: 'Wholesale',
+      count: customersWithTone.filter(c => tagIs(c.tag, 'wholesale')).length,
     },
     {
       key: 'new',
       label: 'New',
-      count: customersWithTone.filter(c => c.tag === 'New').length,
+      count: customersWithTone.filter(c => tagIs(c.tag, 'new')).length,
     },
   ];
 
@@ -501,8 +539,9 @@ export default function CustomersScreen() {
               <View style={styles.tagSelector}>
                 <Text style={styles.tagSelectorLabel}>Tag</Text>
                 <View style={styles.tagChipRow}>
-                  {(['', 'VIP', 'New'] as const).map((t) => {
-                    const active = formData.tag === t;
+                  {/* Stored values match the desktop Customer Tag select (regular / vip / wholesale). */}
+                  {(['', 'regular', 'vip', 'wholesale', 'New'] as const).map((t) => {
+                    const active = (formData.tag || '').toLowerCase() === t.toLowerCase();
                     return (
                       <TouchableOpacity
                         key={t || 'none'}
@@ -512,7 +551,7 @@ export default function CustomersScreen() {
                         activeOpacity={0.7}
                       >
                         <Text style={[styles.tagChipText, active && styles.tagChipTextActive]}>
-                          {t === '' ? 'None' : t}
+                          {t === '' ? 'None' : TAG_LABELS[t.toLowerCase()] ?? t}
                         </Text>
                       </TouchableOpacity>
                     );
@@ -737,10 +776,12 @@ const styles = StyleSheet.create({
   },
   tagChipRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
   },
   tagChip: {
-    flex: 1,
+    flexGrow: 1,
+    paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 10,
     borderWidth: 1,

@@ -861,7 +861,7 @@ model BarOrder {
   branch_id               String
   order_number            String // e.g. B-20261117-0007, unique per store
   client_ref              String    @unique // idempotency key from the submitting device
-  status                  String    @default("submitted") // submitted | accepted | fulfilled | cancelled | rejected | reversed
+  status                  String    @default("submitted") // submitted | accepted | fulfilled | reversal_requested | cancelled | rejected | reversed
   initiated_by_user_id    String // Attendant — the seller of record
   accepted_by_user_id     String?
   fulfilled_by_user_id    String?
@@ -882,6 +882,10 @@ model BarOrder {
   closed_reason           String? // cancel / reject / reversal / reduction reason
   closed_by_user_id       String?
   closed_at               DateTime?
+  // Phase 3: reversal request (Attendant/Controller) -> manager approves or declines
+  reversal_requested_by_user_id String?
+  reversal_requested_at         DateTime?
+  reversal_request_reason       String?
   created_at              DateTime  @default(now())
   updated_at              DateTime  @updatedAt
 
@@ -913,4 +917,53 @@ model BarOrderItem {
 
   @@index([bar_order_id])
   @@index([product_id])
+}
+
+// ─── Bar / Lounge (Phase 3): Attendant ledger + remittances ───
+// What each Attendant owes the house is the SUM of their ledger entries — never a
+// stored balance — so it carries forward across days automatically and is never
+// reset. Entries are append-only; corrections are reversing entries that point at
+// the original (reverses_entry_id @unique => an entry can be reversed only once).
+
+model CashierLedgerEntry {
+  id                  String   @id @default(uuid())
+  store_id            String
+  branch_id           String
+  cashier_user_id     String // the Attendant whose balance this moves
+  entry_type          String // SALE | SALE_REVERSAL | REMITTANCE | REMITTANCE_REVERSAL | WRITE_OFF | ADJUSTMENT
+  amount              Decimal  @db.Decimal(15, 2) // signed: + increases what the Attendant owes
+  business_date       DateTime @db.Date
+  source_type         String // bar_order | remittance | write_off | adjustment
+  source_id           String
+  reverses_entry_id   String?  @unique
+  reason              String?
+  recorded_by_user_id String
+  created_at          DateTime @default(now())
+
+  @@unique([entry_type, source_type, source_id])
+  @@index([store_id, cashier_user_id, business_date])
+  @@index([store_id, business_date])
+}
+
+model CashierRemittance {
+  id                  String    @id @default(uuid())
+  store_id            String
+  branch_id           String
+  cashier_user_id     String // Attendant paying in
+  received_by_user_id String // Bar Controller / manager
+  amount              Decimal   @db.Decimal(15, 2) // > 0
+  method              String // cash | transfer | card | other
+  reference           String? // required for transfer / card
+  narration           String?
+  business_date       DateTime  @db.Date
+  client_ref          String    @unique // idempotency (double-tap safety)
+  status              String    @default("recorded") // recorded | reversed
+  reversed_by_user_id String?
+  reversed_at         DateTime?
+  reversal_reason     String?
+  created_at          DateTime  @default(now())
+
+  @@index([store_id, cashier_user_id, business_date])
+  @@index([store_id, business_date])
+  @@index([store_id, method, reference])
 }

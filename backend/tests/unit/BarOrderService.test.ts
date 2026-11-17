@@ -368,13 +368,13 @@ describe('declarePayment', () => {
   });
 });
 
-describe('reverse (manager/admin, Phase 2 one-step)', () => {
+describe('reverse (manager/admin)', () => {
   it('voids the linked sale through voidSaleCore in the same unit', async () => {
     const voidSpy = jest.spyOn(TransactionService, 'voidSaleCore').mockResolvedValue(undefined as any);
     mockPrisma.barOrder.findUnique.mockResolvedValue(orderRow({ status: 'fulfilled', fulfilled_total: D(1300) }));
     mockPrisma.transaction.findUnique.mockResolvedValue({ id: 'tx-1', status: 'completed', transaction_items: [] });
     await BarOrderService.reverse(manager, 'ord-1', BRANCHES, 'Wrong drinks released');
-    expect(mockPrisma.barOrder.updateMany.mock.calls[0][0]).toMatchObject({ where: { id: 'ord-1', status: 'fulfilled' }, data: { status: 'reversed' } });
+    expect(mockPrisma.barOrder.updateMany.mock.calls[0][0]).toMatchObject({ where: { id: 'ord-1', status: { in: ['fulfilled', 'reversal_requested'] } }, data: { status: 'reversed' } });
     expect(voidSpy).toHaveBeenCalledTimes(1);
     expect(mockPrisma.auditLog.create.mock.calls[0][0].data.action).toBe('BAR_ORDER_REVERSED');
     voidSpy.mockRestore();
@@ -382,5 +382,72 @@ describe('reverse (manager/admin, Phase 2 one-step)', () => {
 
   it('controllers and attendants cannot reverse', async () => {
     await expectError(BarOrderService.reverse(controller, 'ord-1', BRANCHES, 'because'), 403);
+  });
+});
+
+describe('Phase 3: ledger entries + reversal requests', () => {
+  it('release appends ONE SALE ledger entry for the Attendant, in the same unit', async () => {
+    await BarOrderService.fulfil(controller, 'ord-1', BRANCHES, {});
+    expect(mockPrisma.cashierLedgerEntry.create).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.cashierLedgerEntry.create.mock.calls[0][0].data).toMatchObject({
+      cashier_user_id: 'att-1',
+      entry_type: 'SALE',
+      amount: 1300,
+      source_type: 'bar_order',
+      source_id: 'ord-1',
+      recorded_by_user_id: 'ctl-1',
+    });
+  });
+
+  it('a reduced release books only the released amount', async () => {
+    await BarOrderService.fulfil(controller, 'ord-1', BRANCHES, {
+      lines: [{ item_id: 'it-1', quantity: 1 }, { item_id: 'it-2', quantity: 2 }],
+      reduction_reason: 'one Goldberg short',
+    });
+    expect(mockPrisma.cashierLedgerEntry.create.mock.calls[0][0].data.amount).toBe(800);
+  });
+
+  it('reversal cancels the SALE entry exactly (reverses_entry_id) on today', async () => {
+    const voidSpy = jest.spyOn(TransactionService, 'voidSaleCore').mockResolvedValue(undefined as any);
+    mockPrisma.barOrder.findUnique.mockResolvedValue(orderRow({ status: 'reversal_requested', reversal_requested_by_user_id: 'att-1', fulfilled_total: D(1300) }));
+    mockPrisma.transaction.findUnique.mockResolvedValue({ id: 'tx-1', status: 'completed', transaction_items: [] });
+    mockPrisma.cashierLedgerEntry.findUnique.mockResolvedValue({ id: 'led-sale', cashier_user_id: 'att-1', amount: D(1300) });
+    await BarOrderService.reverse(manager, 'ord-1', BRANCHES, 'Bottles returned unopened');
+    expect(mockPrisma.cashierLedgerEntry.create.mock.calls[0][0].data).toMatchObject({
+      cashier_user_id: 'att-1',
+      entry_type: 'SALE_REVERSAL',
+      amount: -1300,
+      reverses_entry_id: 'led-sale',
+      source_id: 'ord-1',
+    });
+    expect(mockPrisma.auditLog.create.mock.calls[0][0].data.changes).toMatchObject({ approved_request: true, ledger_reversed: true });
+    voidSpy.mockRestore();
+  });
+
+  it('a manager cannot approve a reversal they requested (admin can)', async () => {
+    mockPrisma.barOrder.findUnique.mockResolvedValue(orderRow({ status: 'reversal_requested', reversal_requested_by_user_id: 'mgr-1' }));
+    await expectError(BarOrderService.reverse(manager, 'ord-1', BRANCHES, 'my own request'), 403);
+  });
+
+  it('attendant requests a reversal of their released order; others cannot', async () => {
+    mockPrisma.barOrder.findUnique.mockResolvedValue(orderRow({ status: 'fulfilled' }));
+    await BarOrderService.requestReversal(attendant, 'ord-1', { canViewQueue: false, branchIds: BRANCHES }, 'Customer returned 2 bottles');
+    expect(mockPrisma.barOrder.updateMany.mock.calls[0][0]).toMatchObject({
+      where: { id: 'ord-1', status: 'fulfilled' },
+      data: { status: 'reversal_requested', reversal_requested_by_user_id: 'att-1', reversal_request_reason: 'Customer returned 2 bottles' },
+    });
+    await expectError(BarOrderService.requestReversal(otherAttendant, 'ord-1', { canViewQueue: false, branchIds: BRANCHES }, 'not mine'), 404);
+    expect(mockPrisma.cashierLedgerEntry.create).not.toHaveBeenCalled(); // nothing moves until approved
+  });
+
+  it('manager declines: back to released, request cleared, audited; controllers cannot decide', async () => {
+    mockPrisma.barOrder.findUnique.mockResolvedValue(orderRow({ status: 'reversal_requested', reversal_requested_by_user_id: 'att-1', reversal_request_reason: 'x' }));
+    await BarOrderService.declineReversal(manager, 'ord-1', BRANCHES, 'Bottles were opened');
+    expect(mockPrisma.barOrder.updateMany.mock.calls[0][0]).toMatchObject({
+      where: { id: 'ord-1', status: 'reversal_requested' },
+      data: { status: 'fulfilled', reversal_requested_by_user_id: null },
+    });
+    expect(mockPrisma.auditLog.create.mock.calls[0][0].data.action).toBe('BAR_REVERSAL_DECLINED');
+    await expectError(BarOrderService.declineReversal(controller, 'ord-1', BRANCHES, 'nope nope'), 403);
   });
 });

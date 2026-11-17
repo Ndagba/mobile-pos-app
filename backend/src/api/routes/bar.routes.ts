@@ -6,6 +6,7 @@ import { catchAsync, AppError } from '../../utils/errorHandler';
 import { getAuthorizedBranchId, getAuthorizedBranchIds } from '../../utils/branchHelper';
 import { BarOrderService, serializeOrder } from '../../services/BarOrderService';
 import { hasBarCapability } from '../../utils/businessMode';
+import { BarLedgerService } from '../../services/BarLedgerService';
 
 /**
  * Bar / Lounge API (planning Phase 2) — mounted at /v1/bar.
@@ -186,6 +187,174 @@ router.post(
   withScope,
   catchAsync(async (req: Request, res: Response) => {
     send(res, await BarOrderService.reverse(actorOf(req), req.params.id, (req as any).barScope.branchIds, req.body?.reason));
+  })
+);
+
+// ── Reversal requests (Phase 3) ─────────────────────────────
+
+router.post(
+  '/orders/:id/request-reversal',
+  requireActiveSubscription,
+  requireBarCapability('bar.reversal.request'),
+  withScope,
+  catchAsync(async (req: Request, res: Response) => {
+    send(res, await BarOrderService.requestReversal(actorOf(req), req.params.id, (req as any).barScope, req.body?.reason));
+  })
+);
+
+router.post(
+  '/orders/:id/decline-reversal',
+  requireActiveSubscription,
+  requireBarCapability('bar.reversal.approve'),
+  withScope,
+  catchAsync(async (req: Request, res: Response) => {
+    send(res, await BarOrderService.declineReversal(actorOf(req), req.params.id, (req as any).barScope.branchIds, req.body?.reason));
+  })
+);
+
+// ── Attendant: my balance (Phase 3) — always scoped to the caller ──
+
+router.get(
+  '/me/summary',
+  requireBarCapability('bar.ledger.view_own'),
+  catchAsync(async (req: Request, res: Response) => {
+    const a = actorOf(req);
+    res.json({ status: 'success', data: await BarLedgerService.cashierSummary(a.storeId, a.userId, req.query.date) });
+  })
+);
+
+router.get(
+  '/me/ledger',
+  requireBarCapability('bar.ledger.view_own'),
+  catchAsync(async (req: Request, res: Response) => {
+    const a = actorOf(req);
+    const data = await BarLedgerService.entries(a.storeId, a.userId, {
+      from: req.query.from, to: req.query.to, limit: Number(req.query.limit) || undefined,
+    });
+    res.json({ status: 'success', data });
+  })
+);
+
+router.get(
+  '/me/remittances',
+  requireBarCapability('bar.ledger.view_own'),
+  catchAsync(async (req: Request, res: Response) => {
+    const a = actorOf(req);
+    const data = await BarLedgerService.remittances(a.storeId, { cashierId: a.userId, limit: Number(req.query.limit) || undefined });
+    res.json({ status: 'success', data });
+  })
+);
+
+// ── Bar Controller / manager: every Attendant (Phase 3) ──────
+
+router.get(
+  '/dashboard',
+  requireBarCapability('bar.ledger.view_all'),
+  catchAsync(async (req: Request, res: Response) => {
+    const branchIds = await getAuthorizedBranchIds(req);
+    res.json({ status: 'success', data: await BarLedgerService.dashboard(actorOf(req).storeId, branchIds, req.query.date) });
+  })
+);
+
+/** Resolve :id to an Attendant the caller may see (same store; branch scope for non-admins). */
+const cashierInScope = async (req: Request) => {
+  const a = actorOf(req);
+  const cashier = await BarLedgerService.resolveCashier(a, req.params.id);
+  if (a.role !== 'admin' && !a.is_super_admin) {
+    const branchIds = await getAuthorizedBranchIds(req);
+    if (!cashier.branch_id || !branchIds.includes(cashier.branch_id)) throw new AppError(404, 'Attendant not found');
+  }
+  return { actor: a, cashier };
+};
+
+router.get(
+  '/cashiers/:id/summary',
+  requireBarCapability('bar.ledger.view_all'),
+  catchAsync(async (req: Request, res: Response) => {
+    const { cashier } = await cashierInScope(req);
+    res.json({ status: 'success', data: await BarLedgerService.cashierSummary(cashier.store_id, cashier.id, req.query.date) });
+  })
+);
+
+router.get(
+  '/cashiers/:id/ledger',
+  requireBarCapability('bar.ledger.view_all'),
+  catchAsync(async (req: Request, res: Response) => {
+    const { cashier } = await cashierInScope(req);
+    const data = await BarLedgerService.entries(cashier.store_id, cashier.id, {
+      from: req.query.from, to: req.query.to, limit: Number(req.query.limit) || undefined,
+    });
+    res.json({ status: 'success', data });
+  })
+);
+
+router.get(
+  '/cashiers/:id/remittances',
+  requireBarCapability('bar.ledger.view_all'),
+  catchAsync(async (req: Request, res: Response) => {
+    const { cashier } = await cashierInScope(req);
+    const data = await BarLedgerService.remittances(cashier.store_id, { cashierId: cashier.id, limit: Number(req.query.limit) || undefined });
+    res.json({ status: 'success', data });
+  })
+);
+
+router.post(
+  '/cashiers/:id/write-off',
+  requireActiveSubscription,
+  requireBarCapability('bar.ledger.write_off'),
+  catchAsync(async (req: Request, res: Response) => {
+    const { actor, cashier } = await cashierInScope(req);
+    res.json({ status: 'success', data: await BarLedgerService.writeOff(actor, cashier.id, req.body?.amount, req.body?.reason) });
+  })
+);
+
+router.post(
+  '/cashiers/:id/adjustment',
+  requireActiveSubscription,
+  requireBarCapability('bar.ledger.adjust'),
+  catchAsync(async (req: Request, res: Response) => {
+    const { actor, cashier } = await cashierInScope(req);
+    res.json({ status: 'success', data: await BarLedgerService.adjust(actor, cashier.id, req.body?.amount, req.body?.reason) });
+  })
+);
+
+// ── Remittances (Phase 3) ────────────────────────────────────
+
+router.post(
+  '/remittances',
+  requireActiveSubscription,
+  requireBarCapability('bar.remittance.record'),
+  catchAsync(async (req: Request, res: Response) => {
+    const a = actorOf(req);
+    if (a.role !== 'admin' && !a.is_super_admin) {
+      // Branch scope: only Attendants of branches the caller covers.
+      const target = await BarLedgerService.resolveCashier(a, req.body?.cashier_user_id);
+      const branchIds = await getAuthorizedBranchIds(req);
+      if (!target.branch_id || !branchIds.includes(target.branch_id)) throw new AppError(404, 'Attendant not found');
+    }
+    const r = await BarLedgerService.recordRemittance(a, req.body ?? {});
+    res.status(r.replayed ? 200 : 201).json({ status: 'success', data: { ...r.remittance, outstanding_after: r.outstanding_after, replayed: r.replayed } });
+  })
+);
+
+router.get(
+  '/remittances',
+  requireBarCapability('bar.ledger.view_all'),
+  catchAsync(async (req: Request, res: Response) => {
+    const branchIds = await getAuthorizedBranchIds(req);
+    const data = await BarLedgerService.remittances(actorOf(req).storeId, {
+      branchIds, date: req.query.date, limit: Number(req.query.limit) || undefined,
+    });
+    res.json({ status: 'success', data });
+  })
+);
+
+router.post(
+  '/remittances/:id/reverse',
+  requireActiveSubscription,
+  requireBarCapability('bar.remittance.record'),
+  catchAsync(async (req: Request, res: Response) => {
+    res.json({ status: 'success', data: await BarLedgerService.reverseRemittance(actorOf(req), req.params.id, req.body?.reason) });
   })
 );
 

@@ -5,7 +5,9 @@ export class AppError extends Error {
   constructor(
     public statusCode: number,
     public message: string,
-    public isOperational: boolean = true
+    public isOperational: boolean = true,
+    /** Optional machine-readable detail for clients, e.g. { code: 'OVERPAYMENT', outstanding: 5000 }. */
+    public details?: Record<string, unknown>
   ) {
     super(message);
     Object.setPrototypeOf(this, new.target.prototype);
@@ -32,6 +34,7 @@ export const errorHandler = (
     return res.status(err.statusCode).json({
       status: 'error',
       message: err.message,
+      ...(err.details ? { details: err.details } : {}),
       ...(isDevelopment && { stack: err.stack })
     });
   }

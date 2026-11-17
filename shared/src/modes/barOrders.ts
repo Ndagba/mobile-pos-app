@@ -8,13 +8,21 @@
  * subtotal/tax rounded once on the sums, total = subtotal + tax.
  */
 
-export type BarOrderStatus = 'submitted' | 'accepted' | 'fulfilled' | 'cancelled' | 'rejected' | 'reversed';
+export type BarOrderStatus =
+  | 'submitted'
+  | 'accepted'
+  | 'fulfilled'
+  | 'reversal_requested'
+  | 'cancelled'
+  | 'rejected'
+  | 'reversed';
 export type BarPaymentMethod = 'cash' | 'transfer' | 'card' | 'split';
 
 export const BAR_ORDER_STATUS_LABELS: Record<BarOrderStatus, string> = {
   submitted: 'Waiting',
   accepted: 'Being prepared',
   fulfilled: 'Released',
+  reversal_requested: 'Reversal requested',
   cancelled: 'Cancelled',
   rejected: 'Rejected',
   reversed: 'Reversed',
@@ -71,6 +79,7 @@ export interface BarOrder {
   fulfilled_at: string | null;
   closed_reason: string | null;
   closed_at: string | null;
+  reversal_request: { by: string | null; at: string; reason: string | null } | null;
   transaction: { id: string; receipt_number: string | null; status: string } | null;
   items: BarOrderLine[];
   /** Present on submit responses only. */
@@ -102,4 +111,112 @@ export function barOrderAmount(order: Pick<BarOrder, 'fulfilled_total' | 'total_
 export function newBarOrderClientRef(deviceId: string, now: number = Date.now()): string {
   const rand = Math.random().toString(36).slice(2, 10);
   return `${(deviceId || 'device').slice(0, 40)}-${now}-${rand}`;
+}
+
+// ─── Attendant ledger (Phase 3) ───────────────────────────────
+
+export type LedgerEntryType = 'SALE' | 'SALE_REVERSAL' | 'REMITTANCE' | 'REMITTANCE_REVERSAL' | 'WRITE_OFF' | 'ADJUSTMENT';
+
+export const LEDGER_ENTRY_LABELS: Record<LedgerEntryType, string> = {
+  SALE: 'Drinks released',
+  SALE_REVERSAL: 'Sale reversed',
+  REMITTANCE: 'Handed over',
+  REMITTANCE_REVERSAL: 'Hand-over corrected',
+  WRITE_OFF: 'Written off',
+  ADJUSTMENT: 'Adjustment',
+};
+
+export type RemittanceMethod = 'cash' | 'transfer' | 'card' | 'other';
+
+export const REMITTANCE_METHOD_LABELS: Record<RemittanceMethod, string> = {
+  cash: 'Cash',
+  transfer: 'Transfer',
+  card: 'POS',
+  other: 'Other',
+};
+
+export interface LedgerEntry {
+  id: string;
+  entry_type: LedgerEntryType;
+  /** + increases what the Attendant owes. */
+  amount: number;
+  business_date: string;
+  source_type: string;
+  source_id: string;
+  reverses_entry_id: string | null;
+  reason: string | null;
+  recorded_by_user_id: string;
+  created_at: string;
+}
+
+export interface CashierRemittance {
+  id: string;
+  cashier: BarOrderPerson;
+  received_by: BarOrderPerson;
+  amount: number;
+  method: RemittanceMethod;
+  reference: string | null;
+  narration: string | null;
+  business_date: string;
+  status: 'recorded' | 'reversed';
+  reversed_at: string | null;
+  reversal_reason: string | null;
+  created_at: string;
+  outstanding_after?: number;
+  replayed?: boolean;
+}
+
+/** One Attendant's reconciliation for a business date. */
+export interface CashierSummary {
+  business_date: string;
+  today: string;
+  cashier: { id: string; name: string | null; is_active: boolean; operational_profile: string | null };
+  brought_forward: number;
+  sales: number;
+  remitted: number;
+  written_off: number;
+  adjustments: number;
+  closing_balance: number;
+  outstanding_now: number;
+  pending_orders: number;
+  completed_orders: number;
+  /** How customers paid this Attendant (declared on orders). */
+  payment_mix: Partial<Record<'cash' | 'transfer' | 'card', number>>;
+  /** What the Bar Controller actually received from them. */
+  remittance_mix: Partial<Record<RemittanceMethod, number>>;
+}
+
+export interface BarDashboardRow {
+  cashier_id: string;
+  name: string | null;
+  is_active: boolean;
+  operational_profile: string | null;
+  brought_forward: number;
+  sales: number;
+  remitted: number;
+  written_off: number;
+  adjustments: number;
+  closing_balance: number;
+  outstanding_now: number;
+  pending_orders: number;
+  completed_orders: number;
+  reversal_requests: number;
+}
+
+export interface BarDashboard {
+  business_date: string;
+  today: string;
+  totals: Omit<BarDashboardRow, 'cashier_id' | 'name' | 'is_active' | 'operational_profile' | 'adjustments'> & {
+    inactive_with_balance: number;
+  };
+  attendants: BarDashboardRow[];
+  payment_mix: Partial<Record<'cash' | 'transfer' | 'card', number>>;
+  remittance_mix: Partial<Record<RemittanceMethod, number>>;
+}
+
+/** Positive balance = the Attendant owes; negative = the house owes them (credit). */
+export function describeBalance(amount: number): 'owes' | 'settled' | 'credit' {
+  if (amount > 0.009) return 'owes';
+  if (amount < -0.009) return 'credit';
+  return 'settled';
 }

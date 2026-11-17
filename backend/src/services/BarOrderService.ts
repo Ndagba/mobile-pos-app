@@ -5,6 +5,7 @@ import { AppError } from '../utils/errorHandler';
 import { logger } from '../utils/logger';
 import { TransactionService } from './TransactionService';
 import { businessDateToDbDate, getBusinessDate } from '../utils/businessDate';
+import { appendLedgerEntry } from './BarLedgerService';
 
 /**
  * Bar / Lounge orders (planning Phase 2).
@@ -91,6 +92,9 @@ export function serializeOrder(o: OrderWithRelations) {
     fulfilled_at: o.fulfilled_at,
     closed_reason: o.closed_reason,
     closed_at: o.closed_at,
+    reversal_request: o.reversal_requested_at
+      ? { by: o.reversal_requested_by_user_id, at: o.reversal_requested_at, reason: o.reversal_request_reason }
+      : null,
     transaction: o.transaction,
     items: o.items.map((it) => ({
       id: it.id,
@@ -607,7 +611,20 @@ export class BarOrderService {
         business_date: businessDateDb,
       });
 
-      // 4. Audit, in the same unit.
+      // 4. The Attendant now owes the released amount (Phase 3 ledger).
+      await appendLedgerEntry(tx, {
+        store_id: order.store_id,
+        branch_id: order.branch_id,
+        cashier_user_id: order.initiated_by_user_id,
+        entry_type: 'SALE',
+        amount: totals.total_amount,
+        business_date: businessDateDb,
+        source_type: 'bar_order',
+        source_id: order.id,
+        recorded_by_user_id: actor.userId,
+      });
+
+      // 5. Audit, in the same unit.
       await audit(tx, actor, order, 'BAR_ORDER_FULFILLED', {
         order_number: order.order_number,
         attendant_id: order.initiated_by_user_id,
@@ -680,20 +697,87 @@ export class BarOrderService {
   }
 
   /**
-   * Reverse a fulfilled order (manager/admin): restores stock and voids the linked
-   * sale, atomically, with an audit row. Phase 3 turns this into request → approve
-   * and adds the matching Attendant-ledger reversal.
+   * Attendant (own order) or Bar Controller (branch): ask a manager to reverse a
+   * released order — e.g. unopened bottles came back. Nothing moves until approved.
+   */
+  static async requestReversal(
+    actor: BarActor,
+    id: string,
+    opts: { canViewQueue: boolean; branchIds: string[] },
+    reasonRaw: unknown
+  ) {
+    const reason = validateReason(reasonRaw, 'ask for a reversal');
+    const order = await this.getOrder(actor, id, opts);
+    const res = await prisma.$transaction(async (tx) => {
+      const r = await tx.barOrder.updateMany({
+        where: { id, status: 'fulfilled' },
+        data: {
+          status: 'reversal_requested',
+          reversal_requested_by_user_id: actor.userId,
+          reversal_requested_at: new Date(),
+          reversal_request_reason: reason,
+        },
+      });
+      if (r.count === 1) await audit(tx, actor, order, 'BAR_REVERSAL_REQUESTED', { reason });
+      return r.count;
+    });
+    if (res !== 1) await this.conflict(id, 'request reversal');
+    return this.findScoped(actor, id);
+  }
+
+  /** Manager declines a reversal request: the order goes back to released, untouched. */
+  static async declineReversal(actor: BarActor, id: string, branchIds: string[], reasonRaw: unknown) {
+    if (!isSupervisor(actor)) throw new AppError(403, 'Only a manager or admin can decide reversals');
+    const reason = validateReason(reasonRaw, 'decline a reversal');
+    const order = await this.findScoped(actor, id);
+    if (!branchIds.includes(order.branch_id)) throw new AppError(404, 'Order not found');
+    const res = await prisma.$transaction(async (tx) => {
+      const r = await tx.barOrder.updateMany({
+        where: { id, status: 'reversal_requested' },
+        data: {
+          status: 'fulfilled',
+          reversal_requested_by_user_id: null,
+          reversal_requested_at: null,
+          reversal_request_reason: null,
+        },
+      });
+      if (r.count === 1) {
+        await audit(tx, actor, order, 'BAR_REVERSAL_DECLINED', {
+          reason,
+          requested_by: order.reversal_requested_by_user_id,
+          request_reason: order.reversal_request_reason,
+        });
+      }
+      return r.count;
+    });
+    if (res !== 1) await this.conflict(id, 'decline reversal');
+    return this.findScoped(actor, id);
+  }
+
+  /**
+   * Reverse a released order (manager/admin) — directly, or by approving a request.
+   * One atomic unit: order → reversed, stock restored + sale voided (voidSaleCore),
+   * a SALE_REVERSAL ledger entry that cancels the Attendant's SALE entry (dated
+   * today, so past business days are never rewritten), and the audit row.
+   * Approving your own request is refused unless you are an admin (logged).
    */
   static async reverse(actor: BarActor, id: string, branchIds: string[], reasonRaw: unknown) {
     if (!isSupervisor(actor)) throw new AppError(403, 'Only a manager or admin can reverse a released order');
     const reason = validateReason(reasonRaw, 'reverse an order');
     const order = await this.findScoped(actor, id);
     if (!branchIds.includes(order.branch_id)) throw new AppError(404, 'Order not found');
-    if (order.status !== 'fulfilled') throw new AppError(409, `Only released orders can be reversed (this one is ${order.status})`);
+    if (order.status !== 'fulfilled' && order.status !== 'reversal_requested') {
+      throw new AppError(409, `Only released orders can be reversed (this one is ${order.status})`);
+    }
+    if (order.reversal_requested_by_user_id === actor.userId && !isAdmin(actor)) {
+      throw new AppError(403, 'You cannot approve a reversal you asked for');
+    }
+    const day = await storeDayOptions(order.store_id);
+    const todayDb = businessDateToDbDate(getBusinessDate(new Date(), { cutoffHour: day.cutoffHour, timeZone: day.timeZone }));
 
     await prisma.$transaction(async (tx) => {
       const r = await tx.barOrder.updateMany({
-        where: { id, status: 'fulfilled' },
+        where: { id, status: { in: ['fulfilled', 'reversal_requested'] } },
         data: { status: 'reversed', closed_reason: reason, closed_by_user_id: actor.userId, closed_at: new Date() },
       });
       if (r.count !== 1) throw new AppError(409, 'This order was just changed by someone else');
@@ -705,10 +789,33 @@ export class BarOrderService {
       if (sale && sale.status !== 'voided') {
         await TransactionService.voidSaleCore(tx, sale, `Bar order ${order.order_number} reversed: ${reason}`, actor.userId);
       }
+
+      const saleEntry = await tx.cashierLedgerEntry.findUnique({
+        where: { entry_type_source_type_source_id: { entry_type: 'SALE', source_type: 'bar_order', source_id: id } },
+      });
+      if (saleEntry) {
+        await appendLedgerEntry(tx, {
+          store_id: order.store_id,
+          branch_id: order.branch_id,
+          cashier_user_id: saleEntry.cashier_user_id,
+          entry_type: 'SALE_REVERSAL',
+          amount: -Number(saleEntry.amount),
+          business_date: todayDb,
+          source_type: 'bar_order',
+          source_id: id,
+          reverses_entry_id: saleEntry.id,
+          reason,
+          recorded_by_user_id: actor.userId,
+        });
+      }
+
       await audit(tx, actor, order, 'BAR_ORDER_REVERSED', {
         reason,
         transaction_id: sale?.id ?? null,
         amount: Number(order.fulfilled_total ?? order.total_amount),
+        approved_request: order.status === 'reversal_requested',
+        requested_by: order.reversal_requested_by_user_id,
+        ledger_reversed: !!saleEntry,
       });
     });
     return this.findScoped(actor, id);

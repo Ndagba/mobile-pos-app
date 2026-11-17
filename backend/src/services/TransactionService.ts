@@ -33,7 +33,16 @@ export interface CreateTransactionInput {
 }
 
 /** Input to the posting core: a fully-resolved sale with its pre-generated id + receipt number. */
-export type PostSaleInput = CreateTransactionInput & { id: string; receipt_number: string };
+export type PostSaleInput = CreateTransactionInput & {
+  id: string;
+  receipt_number: string;
+  /** Bar/Lounge (Phase 2): the bar order this sale fulfils. Never set for retail. */
+  sales_order_id?: string;
+  /** Bar/Lounge: the Bar Controller who released the drinks (user_id stays the Attendant). */
+  fulfilled_by_user_id?: string;
+  /** Bar/Lounge: business date (YYYY-MM-DD as a UTC-midnight Date) of the sale. */
+  business_date?: Date;
+};
 
 export class TransactionService {
   static async createTransaction(input: CreateTransactionInput) {
@@ -152,6 +161,9 @@ export class TransactionService {
         payment_reference: paymentReference,
         payment_splits: input.payment_splits ? (input.payment_splits as any) : undefined,
         receipt_number: input.receipt_number,
+        sales_order_id: input.sales_order_id,
+        fulfilled_by_user_id: input.fulfilled_by_user_id,
+        business_date: input.business_date,
         is_sync_online: true,
         synced_at: new Date(),
         status: 'completed'
@@ -444,6 +456,61 @@ export class TransactionService {
     };
   }
 
+  /**
+   * Void core: restore PRODUCT stock (+ `adjustment` movements) and mark the sale
+   * voided, on the caller's DB transaction client. `voidTransaction` wraps it for
+   * retail; a Bar/Lounge order reversal calls it inside its own atomic unit.
+   */
+  static async voidSaleCore(
+    tx: Prisma.TransactionClient,
+    transaction: {
+      id: string;
+      store_id: string;
+      branch_id: string;
+      transaction_items: { product_id: string; quantity: Prisma.Decimal | number; product: { item_type: string } }[];
+    },
+    voidReason: string,
+    voidedByUserId: string
+  ) {
+    const transactionId = transaction.id;
+
+    for (const item of transaction.transaction_items) {
+      if (item.product.item_type === 'SERVICE') continue;
+      await tx.inventory.update({
+        where: { product_id: item.product_id },
+        data: {
+          quantity_on_hand: {
+            increment: item.quantity
+          }
+        }
+      });
+
+      await tx.inventoryMovement.create({
+        data: {
+          store_id: transaction.store_id,
+          branch_id: transaction.branch_id,
+          product_id: item.product_id,
+          movement_type: 'adjustment',
+          quantity: item.quantity,
+          reference_id: transactionId,
+          notes: 'Transaction voided',
+          user_id: voidedByUserId
+        }
+      });
+    }
+
+    // Update transaction status
+    await tx.transaction.update({
+      where: { id: transactionId },
+      data: {
+        status: 'voided',
+        void_reason: voidReason,
+        voided_at: new Date(),
+        voided_by: voidedByUserId
+      }
+    });
+  }
+
   static async voidTransaction(transactionId: string, voidReason: string, voidedByUserId: string) {
     try {
       const transaction = await prisma.transaction.findUnique({
@@ -459,44 +526,10 @@ export class TransactionService {
         throw new AppError(400, 'Transaction already voided');
       }
 
-      // Restore inventory
-      await prisma.$transaction(async (tx) => {
-        for (const item of transaction.transaction_items) {
-          if (item.product.item_type === 'SERVICE') continue;
-          await tx.inventory.update({
-            where: { product_id: item.product_id },
-            data: {
-              quantity_on_hand: {
-                increment: item.quantity
-              }
-            }
-          });
-
-          await tx.inventoryMovement.create({
-            data: {
-              store_id: transaction.store_id,
-              branch_id: transaction.branch_id,
-              product_id: item.product_id,
-              movement_type: 'adjustment',
-              quantity: item.quantity,
-              reference_id: transactionId,
-              notes: 'Transaction voided',
-              user_id: voidedByUserId
-            }
-          });
-        }
-
-        // Update transaction status
-        await tx.transaction.update({
-          where: { id: transactionId },
-          data: {
-            status: 'voided',
-            void_reason: voidReason,
-            voided_at: new Date(),
-            voided_by: voidedByUserId
-          }
-        });
-      });
+      // Restore inventory + mark voided, atomically
+      await prisma.$transaction((tx) =>
+        TransactionService.voidSaleCore(tx, transaction, voidReason, voidedByUserId)
+      );
 
       // Log audit
       await prisma.auditLog.create({

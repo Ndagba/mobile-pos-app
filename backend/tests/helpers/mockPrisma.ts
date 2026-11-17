@@ -23,6 +23,7 @@
 export interface MockModel {
   findFirst: jest.Mock;
   findUnique: jest.Mock;
+  findUniqueOrThrow: jest.Mock;
   findMany: jest.Mock;
   create: jest.Mock;
   createMany: jest.Mock;
@@ -40,6 +41,7 @@ function mockModel(): MockModel {
   return {
     findFirst: jest.fn(),
     findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
     findMany: jest.fn(),
     create: jest.fn(),
     createMany: jest.fn(),
@@ -67,6 +69,8 @@ export interface MockPrisma {
   store: MockModel;
   user: MockModel;
   storeSetting: MockModel;
+  barOrder: MockModel;
+  barOrderItem: MockModel;
   $transaction: jest.Mock;
   $queryRaw: jest.Mock;
   $executeRaw: jest.Mock;
@@ -99,6 +103,8 @@ export function createMockPrisma(): MockPrisma {
     store: mockModel(),
     user: mockModel(),
     storeSetting: mockModel(),
+    barOrder: mockModel(),
+    barOrderItem: mockModel(),
     $queryRaw: jest.fn(),
     $executeRaw: jest.fn(),
     $transaction: jest.fn(),

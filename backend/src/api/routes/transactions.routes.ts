@@ -25,12 +25,20 @@ async function loadAccessibleTransaction(
   const user = (req as any).user;
   const tx = await prisma.transaction.findUnique({
     where: { id: req.params.id },
-    select: { id: true, store_id: true, user_id: true }
+    select: { id: true, store_id: true, user_id: true, sales_order_id: true }
   });
   if (!tx || !check(user, tx)) {
     throw new AppError(404, 'Transaction not found');
   }
   return tx;
+}
+
+/** Bar sales are reversed from their bar order so the order (and, from Phase 3,
+ *  the Attendant ledger) stays consistent — never voided/refunded directly. */
+function assertNotBarSale(tx: { sales_order_id: string | null }) {
+  if (tx.sales_order_id) {
+    throw new AppError(409, 'This is a Bar / Lounge sale — reverse it from the bar order instead');
+  }
 }
 
 router.use(authMiddleware);
@@ -159,7 +167,7 @@ router.post(
 
     // Tenant check (risk R2). A permitted cashier may still refund a colleague's sale
     // in the same store, exactly as before.
-    await loadAccessibleTransaction(req, isSameStore);
+    assertNotBarSale(await loadAccessibleTransaction(req, isSameStore));
 
     const result = await TransactionService.refundTransaction(
       req.params.id,
@@ -189,7 +197,7 @@ router.post(
       throw new AppError(400, 'Void reason is required');
     }
 
-    await loadAccessibleTransaction(req);
+    assertNotBarSale(await loadAccessibleTransaction(req));
 
     const result = await TransactionService.voidTransaction(
       req.params.id,

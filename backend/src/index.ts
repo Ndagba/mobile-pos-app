@@ -34,6 +34,7 @@ import shiftsRoutes from './api/routes/shifts.routes';
 import expenseRoutes from './api/routes/expenses.routes';
 import financialsRoutes from './api/routes/financials.routes';
 import locationRoutes from './api/routes/locations.routes';
+import barRoutes from './api/routes/bar.routes';
 
 
 // Fix BigInt serialization
@@ -223,6 +224,7 @@ app.use('/v1/shifts', shiftsRoutes);
 app.use('/v1/expenses', expenseRoutes);
 app.use('/v1/financials', financialsRoutes);
 app.use('/v1/locations', locationRoutes);
+app.use('/v1/bar', barRoutes); // Bar / Lounge mode (404 for retail stores)
 
 
 // 404 handler

@@ -126,6 +126,20 @@ export default function ProfileScreen() {
                 </View>
                 <MaterialCommunityIcons name="chevron-right" size={20} color={C.muted} />
               </TouchableOpacity>
+              {isBar && (
+                <TouchableOpacity
+                  style={[styles.card, styles.linkRow, { marginTop: 10 }]}
+                  activeOpacity={0.75}
+                  onPress={() => navigation.navigate('BarDashboard')}
+                >
+                  <MaterialCommunityIcons name="account-cash-outline" size={20} color={C.accent} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.linkTitle}>Bar: Attendants & money</Text>
+                    <Text style={styles.muted}>Balances, money handed over, reversal requests</Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={20} color={C.muted} />
+                </TouchableOpacity>
+              )}
             </>
           )}
 

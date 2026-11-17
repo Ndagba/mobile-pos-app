@@ -130,6 +130,9 @@ import BarHomeScreen from './screens/BarHomeScreen';
 import BarNewOrderScreen from './screens/BarNewOrderScreen';
 import BarOrdersScreen from './screens/BarOrdersScreen';
 import BarOrderDetailScreen from './screens/BarOrderDetailScreen';
+import BarCashierScreen from './screens/BarCashierScreen';
+import BarRemittanceScreen from './screens/BarRemittanceScreen';
+import BarDashboardScreen from './screens/BarDashboardScreen';
 import { useBusinessMode } from './hooks/useBusinessMode';
 import EmployeeSalesScreen from './screens/EmployeeSalesScreen';
 import AlertsScreen from './screens/AlertsScreen';
@@ -240,6 +243,10 @@ function TabletNavigationRoot() {
         <Stack.Screen name="BarNewOrder" component={BarNewOrderScreen} />
         <Stack.Screen name="BarOrders" component={BarOrdersScreen} />
         <Stack.Screen name="BarOrderDetail" component={BarOrderDetailScreen} />
+        {/* Bar / Lounge money (Phase 3) */}
+        <Stack.Screen name="BarCashier" component={BarCashierScreen} />
+        <Stack.Screen name="BarRemittance" component={BarRemittanceScreen} />
+        <Stack.Screen name="BarDashboard" component={BarDashboardScreen} />
         <Stack.Screen name="Alerts" component={AlertsScreen} />
         {/* Super-admin only: gating is enforced at the screen entry point */}
         <Stack.Screen name="AdminSubscriptions" component={AdminSubscriptionsScreen} />
@@ -490,6 +497,10 @@ function AuthenticatedRoot() {
       <Stack.Screen name="BarNewOrder" component={BarNewOrderScreen} />
       <Stack.Screen name="BarOrders" component={BarOrdersScreen} />
       <Stack.Screen name="BarOrderDetail" component={BarOrderDetailScreen} />
+      {/* Bar / Lounge money (Phase 3) */}
+      <Stack.Screen name="BarCashier" component={BarCashierScreen} />
+      <Stack.Screen name="BarRemittance" component={BarRemittanceScreen} />
+      <Stack.Screen name="BarDashboard" component={BarDashboardScreen} />
       <Stack.Screen name="Alerts" component={AlertsScreen} />
       {/* Super-admin only: gating is enforced at the screen entry point */}
       <Stack.Screen

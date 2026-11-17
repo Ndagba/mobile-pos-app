@@ -15,6 +15,7 @@ const TONE: Record<BarOrderStatus, { fg: string; bg: string }> = {
   submitted: { fg: '#B45309', bg: C.amberBg },
   accepted: { fg: C.violet, bg: C.violetBg },
   fulfilled: { fg: '#047857', bg: C.greenBg },
+  reversal_requested: { fg: '#B45309', bg: C.amberBg },
   cancelled: { fg: C.muted, bg: 'rgba(113,113,122,0.12)' },
   rejected: { fg: C.red, bg: C.redBg },
   reversed: { fg: C.red, bg: C.redBg },
@@ -132,7 +133,96 @@ export function ReasonDialog({
   );
 }
 
+// ─── Phase 3: money widgets ───────────────────────────────────
+
+/** A labelled money figure. `tone` colours the value (e.g. red when someone owes). */
+export function Kpi({
+  label,
+  value,
+  hint,
+  tone,
+  wide,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: 'owes' | 'credit' | 'settled' | 'muted';
+  wide?: boolean;
+}) {
+  const color = tone === 'owes' ? C.red : tone === 'credit' ? '#047857' : tone === 'muted' ? C.muted : C.ink;
+  return (
+    <View style={[styles.kpi, wide && { flexBasis: '100%' }]}>
+      <Text style={styles.kpiLabel}>{label}</Text>
+      <Text style={[styles.kpiValue, { color }]} numberOfLines={1} adjustsFontSizeToFit>
+        {value}
+      </Text>
+      {!!hint && <Text style={styles.kpiHint}>{hint}</Text>}
+    </View>
+  );
+}
+
+/** Method → amount rows, with a total. Empty mix shows a quiet dash. */
+export function MixRows({ mix, labels }: { mix: Record<string, number | undefined>; labels: Record<string, string> }) {
+  const rows = Object.entries(mix).filter(([, v]) => v);
+  if (!rows.length) return <Text style={styles.meta}>Nothing yet</Text>;
+  const total = rows.reduce((a, [, v]) => a + (v ?? 0), 0);
+  return (
+    <View>
+      {rows.map(([k, v]) => (
+        <View key={k} style={styles.mixRow}>
+          <Text style={styles.mixLabel}>{labels[k] ?? k}</Text>
+          <Text style={styles.mixValue}>{naira(v ?? 0)}</Text>
+        </View>
+      ))}
+      <View style={[styles.mixRow, { borderTopWidth: 1, borderTopColor: C.border, marginTop: 4, paddingTop: 6 }]}>
+        <Text style={[styles.mixLabel, { fontWeight: '800' }]}>Total</Text>
+        <Text style={[styles.mixValue, { fontWeight: '800' }]}>{naira(total)}</Text>
+      </View>
+    </View>
+  );
+}
+
+/** Previous / next business-day picker (never past today). */
+export function DayPicker({ date, today, onChange }: { date: string; today: string; onChange: (d: string) => void }) {
+  const shift = (days: number) => {
+    const d = new Date(`${date}T00:00:00.000Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    const next = d.toISOString().slice(0, 10);
+    if (next <= today) onChange(next);
+  };
+  const label =
+    date === today
+      ? 'Today'
+      : new Date(`${date}T12:00:00.000Z`).toLocaleDateString('en-NG', { weekday: 'short', day: 'numeric', month: 'short' });
+  return (
+    <View style={styles.dayPicker}>
+      <TouchableOpacity onPress={() => shift(-1)} style={styles.dayBtn} accessibilityLabel="Previous day">
+        <MaterialCommunityIcons name="chevron-left" size={20} color={C.ink} />
+      </TouchableOpacity>
+      <Text style={styles.dayLabel}>{label}</Text>
+      <TouchableOpacity
+        onPress={() => shift(1)}
+        style={styles.dayBtn}
+        disabled={date >= today}
+        accessibilityLabel="Next day"
+      >
+        <MaterialCommunityIcons name="chevron-right" size={20} color={date >= today ? C.muted : C.ink} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  kpi: { flexBasis: '47%', flexGrow: 1, backgroundColor: C.card, borderRadius: 14, borderWidth: 1, borderColor: C.border, padding: 12 },
+  kpiLabel: { fontSize: 11, fontWeight: '700', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.4 },
+  kpiValue: { fontSize: 20, fontWeight: '800', marginTop: 4, fontVariant: ['tabular-nums'] },
+  kpiHint: { fontSize: 11, color: C.muted, marginTop: 2 },
+  mixRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
+  mixLabel: { fontSize: 13, color: C.ink },
+  mixValue: { fontSize: 13, color: C.ink, fontVariant: ['tabular-nums'] },
+  dayPicker: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, paddingVertical: 8 },
+  dayBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: C.card, borderWidth: 1, borderColor: C.border },
+  dayLabel: { fontSize: 15, fontWeight: '700', color: C.ink, minWidth: 120, textAlign: 'center' },
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
   badgeText: { fontSize: 11, fontWeight: '700' },
   card: { backgroundColor: C.card, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 14, marginBottom: 10, gap: 6 },

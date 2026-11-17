@@ -31,7 +31,7 @@ import {
  * The server enforces every rule; this screen only shows the actions that apply.
  */
 
-type Dialog = null | 'cancel' | 'reject' | 'reverse' | 'reduce';
+type Dialog = null | 'cancel' | 'reject' | 'reverse' | 'reduce' | 'request' | 'decline';
 const METHODS: BarPaymentMethod[] = ['cash', 'transfer', 'card', 'split'];
 
 export default function BarOrderDetailScreen() {
@@ -163,6 +163,9 @@ export default function BarOrderDetailScreen() {
           )}
           {!!order.transaction?.receipt_number && <Detail label="Receipt" value={order.transaction.receipt_number} />}
           {!!order.closed_reason && <Detail label="Note" value={order.closed_reason} />}
+          {order.reversal_request && (
+            <Detail label="Reversal asked" value={order.reversal_request.reason ?? '—'} />
+          )}
         </View>
 
         {/* Lines — editable (down only) when a controller is about to release */}
@@ -322,10 +325,26 @@ export default function BarOrderDetailScreen() {
           </>
         )}
 
-        {order.status === 'fulfilled' && isSupervisor && can('bar.reversal.approve') && (
-          <Button mode="outlined" textColor={C.red} style={{ marginTop: 16 }} disabled={busy || !online} onPress={() => setDialog('reverse')}>
-            Reverse this sale
+        {/* Phase 3: Attendant / Controller ask; a manager approves or declines. */}
+        {order.status === 'fulfilled' && !isSupervisor && (mine || can('bar.order.queue.view')) && can('bar.reversal.request') && (
+          <Button mode="outlined" textColor={C.red} style={{ marginTop: 16 }} disabled={busy || !online} onPress={() => setDialog('request')}>
+            Ask a manager to reverse this sale
           </Button>
+        )}
+        {order.status === 'reversal_requested' && !isSupervisor && (
+          <Text style={[styles.muted, { marginTop: 12 }]}>Waiting for a manager to decide on the reversal.</Text>
+        )}
+        {(order.status === 'fulfilled' || order.status === 'reversal_requested') && isSupervisor && can('bar.reversal.approve') && (
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 16 }}>
+            <Button mode="outlined" textColor={C.red} style={{ flex: 1 }} disabled={busy || !online} onPress={() => setDialog('reverse')}>
+              {order.status === 'reversal_requested' ? 'Approve reversal' : 'Reverse this sale'}
+            </Button>
+            {order.status === 'reversal_requested' && (
+              <Button mode="outlined" style={{ flex: 1 }} disabled={busy || !online} onPress={() => setDialog('decline')}>
+                Decline
+              </Button>
+            )}
+          </View>
         )}
       </ScrollView>
 
@@ -358,11 +377,27 @@ export default function BarOrderDetailScreen() {
       <ReasonDialog
         visible={dialog === 'reverse'}
         title="Reverse this sale?"
-        message="Only when the drinks came back unopened. Stock is restored and the sale is voided."
+        message="Only when the drinks came back unopened. Stock is restored, the sale is voided and the Attendant's balance goes down."
         confirmLabel="Reverse"
         destructive
         onCancel={() => setDialog(null)}
         onConfirm={(r) => run(() => barApi.reverse(order.id, r), 'Sale reversed')}
+      />
+      <ReasonDialog
+        visible={dialog === 'request'}
+        title="Ask for a reversal?"
+        message="For unopened drinks that came back. A manager decides; nothing changes until then."
+        confirmLabel="Send request"
+        onCancel={() => setDialog(null)}
+        onConfirm={(r) => run(() => barApi.requestReversal(order.id, r), 'Request sent to the manager')}
+      />
+      <ReasonDialog
+        visible={dialog === 'decline'}
+        title="Decline the reversal?"
+        message="The sale stays as it is. The requester will see your reason in the audit log."
+        confirmLabel="Decline"
+        onCancel={() => setDialog(null)}
+        onConfirm={(r) => run(() => barApi.declineReversal(order.id, r), 'Reversal declined')}
       />
     </View>
   );

@@ -24,7 +24,7 @@ import {
 type Mode = 'mine' | 'queue';
 const TABS: { key: string; label: string; status?: string }[] = [
   { key: 'open', label: 'Open', status: undefined },
-  { key: 'released', label: 'Released', status: 'fulfilled' },
+  { key: 'released', label: 'Released', status: 'fulfilled,reversal_requested' },
   { key: 'closed', label: 'Closed', status: 'cancelled,rejected,reversed' },
 ];
 
@@ -35,12 +35,17 @@ export default function BarOrdersScreen() {
   const mode: Mode = route.params?.mode === 'queue' ? 'queue' : 'mine';
   const { can } = useBusinessMode();
 
-  const [tab, setTab] = useState('open');
+  // Managers also get a Reversals tab (Phase 3: requests waiting for approval).
+  const tabs =
+    mode === 'queue' && can('bar.reversal.approve')
+      ? [...TABS, { key: 'reversals', label: 'Reversals', status: 'reversal_requested' }]
+      : TABS;
+  const [tab, setTab] = useState<string>(route.params?.tab ?? 'open');
   const [orders, setOrders] = useState<BarOrder[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const status = TABS.find((t) => t.key === tab)?.status;
+  const status = tabs.find((t) => t.key === tab)?.status;
 
   const load = useCallback(async () => {
     try {
@@ -90,7 +95,7 @@ export default function BarOrdersScreen() {
       ) : (
         <>
           <View style={styles.tabs}>
-            {TABS.map((t) => (
+            {tabs.map((t) => (
               <TouchableOpacity
                 key={t.key}
                 onPress={() => {

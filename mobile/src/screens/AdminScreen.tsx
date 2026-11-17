@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import { RootState } from '../redux/store';
 import { C } from '../theme';
+import { useBusinessMode } from '../hooks/useBusinessMode';
 
 interface AdminMenuItemProps {
   icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -35,6 +36,7 @@ export default function AdminScreen() {
   const insets = useSafeAreaInsets();
   const user = useSelector((s: RootState) => s.auth.user);
   const isAdmin = user?.role === 'admin';
+  const bm = useBusinessMode();
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -120,6 +122,24 @@ export default function AdminScreen() {
           color="#F59E0B"
           onPress={() => navigation.navigate('BarSetup')}
         />
+        {bm.isBar && (
+          <>
+            <AdminMenuItem
+              icon="account-cash-outline"
+              title="Bar: Attendants & money"
+              description="What each Attendant sold, handed over and still owes; record money; approve reversals"
+              color="#10B981"
+              onPress={() => navigation.navigate('BarDashboard')}
+            />
+            <AdminMenuItem
+              icon="inbox-arrow-down"
+              title="Bar: Order queue"
+              description="Orders waiting for the Bar Controller"
+              color="#6E56F7"
+              onPress={() => navigation.navigate('BarOrders', { mode: 'queue' })}
+            />
+          </>
+        )}
       </ScrollView>
     </View>
   );

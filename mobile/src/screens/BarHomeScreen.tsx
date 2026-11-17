@@ -1,14 +1,16 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
-import { OPERATIONAL_PROFILE_LABELS } from '@jaypos/shared';
+import { OPERATIONAL_PROFILE_LABELS, type CashierSummary } from '@jaypos/shared';
 
 import { RootState } from '../redux/store';
 import { useBusinessMode } from '../hooks/useBusinessMode';
-import { C } from '../theme';
+import { barApi } from '../services/barApi';
+import { usePolling } from '../hooks/usePolling';
+import { C, naira } from '../theme';
 
 /**
  * Home tab for cashiers in a Bar / Lounge store (Bar/Lounge planning, Phase 1).
@@ -36,6 +38,18 @@ export default function BarHomeScreen() {
   const user = useSelector((s: RootState) => s.auth.user);
   const { profile, canRetailCheckout } = useBusinessMode();
   const name = user?.first_name || 'there';
+
+  // Attendant headline (Phase 3): what they owe right now, refreshed while open.
+  const [summary, setSummary] = useState<CashierSummary | null>(null);
+  const loadSummary = useCallback(async () => {
+    if (profile !== 'bar_attendant') return;
+    try {
+      setSummary(await barApi.mySummary());
+    } catch {
+      // offline / not yet available — keep the last figure
+    }
+  }, [profile]);
+  usePolling(loadSummary, 30000);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
@@ -79,16 +93,36 @@ export default function BarHomeScreen() {
       </View>
 
       {/* Phase 2 actions */}
+      {profile === 'bar_attendant' && summary && (
+        <TouchableOpacity style={styles.owedCard} activeOpacity={0.85} onPress={() => navigation.navigate('BarCashier')}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.muted}>You owe</Text>
+            <Text style={[styles.owedValue, summary.outstanding_now > 0 && { color: C.red }]}>{naira(Math.max(0, summary.outstanding_now))}</Text>
+            <Text style={styles.muted}>
+              Today: sales {naira(summary.sales)} · handed over {naira(summary.remitted)}
+              {summary.brought_forward > 0 ? ` · ${naira(summary.brought_forward)} from earlier days` : ''}
+            </Text>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={22} color={C.muted} />
+        </TouchableOpacity>
+      )}
       {profile === 'bar_attendant' && (
         <View style={styles.actions}>
           <ActionTile icon="cart-plus" label="New order" primary onPress={() => navigation.navigate('BarNewOrder')} />
           <ActionTile icon="format-list-checks" label="My orders" onPress={() => navigation.navigate('BarOrders', { mode: 'mine' })} />
+          <ActionTile icon="wallet-outline" label="My balance" onPress={() => navigation.navigate('BarCashier')} />
         </View>
       )}
       {profile === 'bar_controller' && (
-        <View style={styles.actions}>
-          <ActionTile icon="inbox-arrow-down" label="Order queue" primary onPress={() => navigation.navigate('BarOrders', { mode: 'queue' })} />
-        </View>
+        <>
+          <View style={styles.actions}>
+            <ActionTile icon="inbox-arrow-down" label="Order queue" primary onPress={() => navigation.navigate('BarOrders', { mode: 'queue' })} />
+            <ActionTile icon="cash-plus" label="Record money" onPress={() => navigation.navigate('BarRemittance')} />
+          </View>
+          <View style={styles.actions}>
+            <ActionTile icon="account-group-outline" label="Attendants & money" onPress={() => navigation.navigate('BarDashboard')} />
+          </View>
+        </>
       )}
 
       {canRetailCheckout && (
@@ -118,6 +152,8 @@ function ActionTile({ icon, label, primary, onPress }: { icon: string; label: st
 
 const styles = StyleSheet.create({
   actions: { flexDirection: 'row', gap: 12, marginTop: 16 },
+  owedCard: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16, padding: 16, borderRadius: 16, backgroundColor: C.card, borderWidth: 1, borderColor: C.border },
+  owedValue: { fontSize: 30, fontWeight: '800', color: C.ink, fontVariant: ['tabular-nums'] },
   tile: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 22, borderRadius: 16, backgroundColor: C.card, borderWidth: 1, borderColor: C.border },
   tilePrimary: { backgroundColor: C.accent, borderColor: C.accent },
   tileText: { fontSize: 15, fontWeight: '800', color: C.ink },

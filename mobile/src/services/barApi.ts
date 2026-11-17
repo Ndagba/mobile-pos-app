@@ -1,19 +1,27 @@
-import type { BarOrder, BarPaymentMethod } from '@jaypos/shared';
+import type {
+  BarDashboard,
+  BarOrder,
+  BarPaymentMethod,
+  CashierRemittance,
+  CashierSummary,
+  LedgerEntry,
+  RemittanceMethod,
+} from '@jaypos/shared';
 import ApiClient from './ApiClient';
 
 /**
- * Bar / Lounge API client (planning Phase 2).
+ * Bar / Lounge API client (planning Phases 2–3).
  *
- * The bar order flow is ONLINE-ONLY: an order has to reach the Bar Controller.
- * ApiClient's offline fallback queues writes and echoes the request body back as
- * if it had succeeded — for a bar order that would fake a submit or a release, so
- * every write here refuses up front when offline, and every response is checked
- * to be a real server order.
+ * The bar flow is ONLINE-ONLY: an order has to reach the Bar Controller and money
+ * has to be recorded against the right person. ApiClient's offline fallback queues
+ * writes and echoes the request body back as if it had succeeded — for a bar order
+ * or a remittance that would fake the action, so every write here refuses up front
+ * when offline, and every response is checked to be a real server object.
  */
 
 export class BarOfflineError extends Error {
   constructor() {
-    super("You're offline. Bar orders need a connection — reconnect and try again.");
+    super("You're offline. Bar orders and payments need a connection — reconnect and try again.");
     this.name = 'BarOfflineError';
   }
 }
@@ -30,14 +38,34 @@ const asOrder = (res: any): BarOrder => {
   return res as BarOrder;
 };
 
-const asList = (res: any): BarOrder[] => (Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : []);
+const asObject = <T,>(res: any, key: string): T => {
+  if (!res || typeof res !== 'object' || !(key in res)) {
+    throw new Error('No response from the server. Check your connection and try again.');
+  }
+  return res as T;
+};
+
+const asList = <T,>(res: any): T[] => (Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : []);
+
+const query = (params: Record<string, string | undefined>) => {
+  const parts = Object.entries(params)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v as string)}`);
+  return parts.length ? `?${parts.join('&')}` : '';
+};
 
 /** Pull the server's message out of an axios error (falls back to the JS message). */
 export function barErrorMessage(e: any, fallback = 'Something went wrong. Please try again.'): string {
   return e?.response?.data?.message || e?.message || fallback;
 }
 
+/** Machine-readable detail the server attaches to some errors, e.g. { code: 'OVERPAYMENT', outstanding }. */
+export function barErrorDetails(e: any): Record<string, any> | null {
+  return e?.response?.data?.details ?? null;
+}
+
 export const barApi = {
+  // ── Orders (Phase 2) ──
   async submit(body: {
     client_ref: string;
     items: { product_id: string; quantity: number }[];
@@ -51,11 +79,11 @@ export const barApi = {
   },
 
   async mine(status?: string): Promise<BarOrder[]> {
-    return asList(await ApiClient.get(`/bar/orders/mine${status ? `?status=${encodeURIComponent(status)}` : ''}`));
+    return asList(await ApiClient.get(`/bar/orders/mine${query({ status })}`));
   },
 
   async queue(status?: string): Promise<BarOrder[]> {
-    return asList(await ApiClient.get(`/bar/orders/queue${status ? `?status=${encodeURIComponent(status)}` : ''}`));
+    return asList(await ApiClient.get(`/bar/orders/queue${query({ status })}`));
   },
 
   async get(id: string): Promise<BarOrder> {
@@ -99,5 +127,82 @@ export const barApi = {
   async reverse(id: string, reason: string) {
     requireOnline();
     return asOrder(await ApiClient.post(`/bar/orders/${id}/reverse`, { reason }));
+  },
+
+  // ── Reversal requests (Phase 3) ──
+  async requestReversal(id: string, reason: string) {
+    requireOnline();
+    return asOrder(await ApiClient.post(`/bar/orders/${id}/request-reversal`, { reason }));
+  },
+
+  async declineReversal(id: string, reason: string) {
+    requireOnline();
+    return asOrder(await ApiClient.post(`/bar/orders/${id}/decline-reversal`, { reason }));
+  },
+
+  // ── Balances (Phase 3): Attendant = own; Controller/manager = anyone in scope ──
+  async mySummary(date?: string): Promise<CashierSummary> {
+    return asObject(await ApiClient.get(`/bar/me/summary${query({ date })}`), 'outstanding_now');
+  },
+
+  async myLedger(): Promise<LedgerEntry[]> {
+    return asList(await ApiClient.get('/bar/me/ledger'));
+  },
+
+  async myRemittances(): Promise<CashierRemittance[]> {
+    return asList(await ApiClient.get('/bar/me/remittances'));
+  },
+
+  async dashboard(date?: string): Promise<BarDashboard> {
+    return asObject(await ApiClient.get(`/bar/dashboard${query({ date })}`), 'attendants');
+  },
+
+  async cashierSummary(id: string, date?: string): Promise<CashierSummary> {
+    return asObject(await ApiClient.get(`/bar/cashiers/${id}/summary${query({ date })}`), 'outstanding_now');
+  },
+
+  async cashierLedger(id: string): Promise<LedgerEntry[]> {
+    return asList(await ApiClient.get(`/bar/cashiers/${id}/ledger`));
+  },
+
+  async cashierRemittances(id: string): Promise<CashierRemittance[]> {
+    return asList(await ApiClient.get(`/bar/cashiers/${id}/remittances`));
+  },
+
+  // ── Money handed over (Phase 3) ──
+  async recordRemittance(body: {
+    cashier_user_id: string;
+    amount: number;
+    method: RemittanceMethod;
+    reference?: string;
+    narration?: string;
+    business_date?: string;
+    client_ref: string;
+    confirm_overpayment?: boolean;
+    confirm_duplicate?: boolean;
+  }): Promise<CashierRemittance> {
+    requireOnline();
+    return asObject(await ApiClient.post('/bar/remittances', body), 'received_by');
+  },
+
+  async reverseRemittance(id: string, reason: string): Promise<CashierRemittance> {
+    requireOnline();
+    return asObject(await ApiClient.post(`/bar/remittances/${id}/reverse`, { reason }), 'received_by');
+  },
+
+  async writeOff(cashierId: string, amount: number, reason: string) {
+    requireOnline();
+    return asObject<{ outstanding_after: number }>(
+      await ApiClient.post(`/bar/cashiers/${cashierId}/write-off`, { amount, reason }),
+      'outstanding_after'
+    );
+  },
+
+  async adjust(cashierId: string, amount: number, reason: string) {
+    requireOnline();
+    return asObject<{ outstanding_after: number }>(
+      await ApiClient.post(`/bar/cashiers/${cashierId}/adjustment`, { amount, reason }),
+      'outstanding_after'
+    );
   },
 };

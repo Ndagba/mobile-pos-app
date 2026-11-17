@@ -138,6 +138,20 @@ export default function AdminScreen() {
               color="#6E56F7"
               onPress={() => navigation.navigate('BarOrders', { mode: 'queue' })}
             />
+            <AdminMenuItem
+              icon="inbox-full-outline"
+              title="Bar: Day closes"
+              description="Bar Controller handovers: acknowledge cash, settle shortages, reopen a day"
+              color="#F59E0B"
+              onPress={() => navigation.navigate('BarHandover')}
+            />
+            <AdminMenuItem
+              icon="bottle-wine-outline"
+              title="Bar: Flat / damaged"
+              description="Record and review damaged drinks (house loss)"
+              color="#FB7185"
+              onPress={() => navigation.navigate('BarDamage')}
+            />
           </>
         )}
       </ScrollView>

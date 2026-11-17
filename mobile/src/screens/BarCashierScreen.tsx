@@ -5,7 +5,9 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import {
   BAR_PAYMENT_METHOD_LABELS,
+  DAMAGE_REASON_LABELS,
   LEDGER_ENTRY_LABELS,
+  type DamageList,
   REMITTANCE_METHOD_LABELS,
   describeBalance,
   type CashierRemittance,
@@ -53,7 +55,10 @@ export default function BarCashierScreen() {
   const [moneyReason, setMoneyReason] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const [damages, setDamages] = useState<DamageList | null>(null);
+
   const load = useCallback(async () => {
+    if (self) barApi.myDamages().then(setDamages).catch(() => {}); // information only (D24)
     try {
       const [s, r, l] = self
         ? await Promise.all([barApi.mySummary(date), barApi.myRemittances(), barApi.myLedger()])
@@ -212,6 +217,26 @@ export default function BarCashierScreen() {
             </View>
           ))}
         </View>
+
+        {/* Damages naming me (Phase 4) — information only, never charged */}
+        {self && damages && damages.items.length > 0 && (
+          <>
+            <Text style={styles.section}>Damaged drinks noted with your name</Text>
+            <View style={styles.card}>
+              <Text style={[styles.muted, { marginBottom: 6 }]}>These are a house loss — they don't change what you owe.</Text>
+              {damages.items.slice(0, 20).map((d) => (
+                <View key={d.id} style={styles.row}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rowTitle}>
+                      {d.quantity} × {d.product_name ?? 'Item'} · {DAMAGE_REASON_LABELS[d.reason_code] ?? d.reason_code}
+                    </Text>
+                    <Text style={styles.muted}>{d.business_date} · recorded by {d.recorded_by.name ?? '—'}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </>
+        )}
 
         {/* Ledger */}
         <Text style={styles.section}>Every entry</Text>

@@ -140,6 +140,20 @@ export default function ProfileScreen() {
                   <MaterialCommunityIcons name="chevron-right" size={20} color={C.muted} />
                 </TouchableOpacity>
               )}
+              {isBar && (
+                <TouchableOpacity
+                  style={[styles.card, styles.linkRow, { marginTop: 10 }]}
+                  activeOpacity={0.75}
+                  onPress={() => navigation.navigate('BarHandover')}
+                >
+                  <MaterialCommunityIcons name="inbox-full-outline" size={20} color={C.accent} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.linkTitle}>Bar: Day closes</Text>
+                    <Text style={styles.muted}>Acknowledge handovers, settle shortages, reopen a day</Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={20} color={C.muted} />
+                </TouchableOpacity>
+              )}
             </>
           )}
 

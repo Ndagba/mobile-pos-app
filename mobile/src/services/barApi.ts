@@ -4,6 +4,11 @@ import type {
   BarPaymentMethod,
   CashierRemittance,
   CashierSummary,
+  DamageList,
+  DamageReason,
+  DamageRecord,
+  DayClose,
+  DayClosePreview,
   LedgerEntry,
   RemittanceMethod,
 } from '@jaypos/shared';
@@ -204,5 +209,58 @@ export const barApi = {
       await ApiClient.post(`/bar/cashiers/${cashierId}/adjustment`, { amount, reason }),
       'outstanding_after'
     );
+  },
+
+  // ── Damages (Phase 4) — house loss ──
+  async recordDamage(body: {
+    client_ref: string;
+    product_id: string;
+    quantity: number;
+    reason_code: DamageReason;
+    notes?: string;
+    responsible_user_id?: string | null;
+  }): Promise<DamageRecord> {
+    requireOnline();
+    return asObject(await ApiClient.post('/bar/damages', body), 'reason_code');
+  },
+
+  async damages(params: { date?: string; from?: string; to?: string; include_reversed?: string } = {}): Promise<DamageList> {
+    return asObject(await ApiClient.get(`/bar/damages${query(params)}`), 'totals');
+  },
+
+  async myDamages(): Promise<DamageList> {
+    return asObject(await ApiClient.get('/bar/me/damages'), 'totals');
+  },
+
+  async reverseDamage(id: string, reason: string): Promise<DamageRecord> {
+    requireOnline();
+    return asObject(await ApiClient.post(`/bar/damages/${id}/reverse`, { reason }), 'reason_code');
+  },
+
+  // ── Day close + handover (Phase 4) ──
+  async dayClosePreview(date?: string): Promise<DayClosePreview> {
+    return asObject(await ApiClient.get(`/bar/day-close/preview${query({ date })}`), 'figures');
+  },
+
+  async submitDayClose(body: { business_date?: string; counted_cash: number; variance_reason?: string; notes?: string }): Promise<DayClose> {
+    requireOnline();
+    return asObject(await ApiClient.post('/bar/day-close', body), 'counted_cash');
+  },
+
+  async dayCloses(params: { status?: string; date?: string; mine?: string } = {}): Promise<DayClose[]> {
+    return asList(await ApiClient.get(`/bar/day-close${query(params)}`));
+  },
+
+  async acknowledgeDayClose(
+    id: string,
+    body: { acknowledged_amount: number; note?: string; variance_treatment?: 'absorb' | 'charge_controller' }
+  ): Promise<DayClose> {
+    requireOnline();
+    return asObject(await ApiClient.post(`/bar/day-close/${id}/acknowledge`, body), 'counted_cash');
+  },
+
+  async reopenDayClose(id: string, reason: string): Promise<DayClose> {
+    requireOnline();
+    return asObject(await ApiClient.post(`/bar/day-close/${id}/reopen`, { reason }), 'counted_cash');
   },
 };

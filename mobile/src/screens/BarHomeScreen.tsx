@@ -121,6 +121,10 @@ export default function BarHomeScreen() {
           </View>
           <View style={styles.actions}>
             <ActionTile icon="account-group-outline" label="Attendants & money" onPress={() => navigation.navigate('BarDashboard')} />
+            <ActionTile icon="bottle-wine-outline" label="Flat / damaged" onPress={() => navigation.navigate('BarDamage')} />
+          </View>
+          <View style={styles.actions}>
+            <ActionTile icon="lock-outline" label="Close my day" onPress={() => navigation.navigate('BarDayClose')} />
           </View>
         </>
       )}

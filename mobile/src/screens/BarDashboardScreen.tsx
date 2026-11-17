@@ -96,6 +96,22 @@ export default function BarDashboardScreen() {
                 Queue{t.pending_orders ? ` (${t.pending_orders})` : ''}
               </Button>
             </View>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+              {can('bar.damage.record') && (
+                <Button mode="outlined" icon="bottle-wine-outline" style={{ flex: 1 }} onPress={() => navigation.navigate('BarDamage')}>
+                  Flat / damaged
+                </Button>
+              )}
+              {can('bar.dayclose.acknowledge') ? (
+                <Button mode="outlined" icon="inbox-full-outline" style={{ flex: 1 }} onPress={() => navigation.navigate('BarHandover')}>
+                  Day closes
+                </Button>
+              ) : can('bar.dayclose.submit') ? (
+                <Button mode="outlined" icon="lock-outline" style={{ flex: 1 }} onPress={() => navigation.navigate('BarDayClose')}>
+                  Close my day
+                </Button>
+              ) : null}
+            </View>
             {t.reversal_requests > 0 && can('bar.reversal.approve') && (
               <TouchableOpacity style={styles.notice} onPress={() => navigation.navigate('BarOrders', { mode: 'queue', tab: 'reversals' })}>
                 <MaterialCommunityIcons name="undo-variant" size={18} color="#B45309" />

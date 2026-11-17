@@ -63,6 +63,7 @@ export interface MockPrisma {
   customer: MockModel;
   auditLog: MockModel;
   batchTracking: MockModel;
+  serviceComponent: MockModel;
   $transaction: jest.Mock;
   $queryRaw: jest.Mock;
   $executeRaw: jest.Mock;
@@ -91,6 +92,7 @@ export function createMockPrisma(): MockPrisma {
     customer: mockModel(),
     auditLog: mockModel(),
     batchTracking: mockModel(),
+    serviceComponent: mockModel(),
     $queryRaw: jest.fn(),
     $executeRaw: jest.fn(),
     $transaction: jest.fn(),

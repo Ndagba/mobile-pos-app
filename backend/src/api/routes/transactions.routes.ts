@@ -4,8 +4,33 @@ import { authMiddleware } from '../middleware/auth.middleware';
 import { requireActiveSubscription } from '../middleware/featureGate.middleware';
 import { catchAsync, AppError } from '../../utils/errorHandler';
 import { prisma } from '../../lib/prisma';
+import {
+  canAccessTransaction,
+  canVoidTransaction,
+  isSameStore,
+  scopedListUserId
+} from '../../utils/transactionAccess';
 
 const router = Router();
+
+/**
+ * Load the minimal ownership fields of a sale and 404 if the caller may not see it
+ * (wrong store, or a cashier asking for someone else's sale). Phase 0 / risk R2.
+ */
+async function loadAccessibleTransaction(
+  req: Request,
+  check: typeof canAccessTransaction = canAccessTransaction
+) {
+  const user = (req as any).user;
+  const tx = await prisma.transaction.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, store_id: true, user_id: true }
+  });
+  if (!tx || !check(user, tx)) {
+    throw new AppError(404, 'Transaction not found');
+  }
+  return tx;
+}
 
 router.use(authMiddleware);
 
@@ -71,9 +96,10 @@ router.get(
   '/',
   catchAsync(async (req: Request, res: Response) => {
     const { limit = '50', offset = '0', dateFrom, dateTo, paymentMethod, status, branchId } = req.query;
+    const user = (req as any).user;
 
     const result = await TransactionService.getStoreTransactions(
-      (req as any).user.storeId,
+      user.storeId,
       parseInt(limit as string),
       parseInt(offset as string),
       {
@@ -82,7 +108,8 @@ router.get(
         paymentMethod: paymentMethod as string,
         status: status as string,
         branchId: branchId && branchId !== 'null' && branchId !== 'undefined' ? branchId as string : undefined,
-        userId: req.query.userId ? req.query.userId as string : undefined,
+        // Cashiers only ever see their own sales (risk R1, decision D1).
+        userId: scopedListUserId(user, req.query.userId ? (req.query.userId as string) : undefined),
         search: req.query.search ? (req.query.search as string) : undefined,
         includeItems: req.query.includeItems === 'true',
       }
@@ -99,6 +126,7 @@ router.get(
 router.get(
   '/:id',
   catchAsync(async (req: Request, res: Response) => {
+    await loadAccessibleTransaction(req);
     const transaction = await TransactionService.getTransactionById(req.params.id);
 
     res.json({
@@ -108,7 +136,7 @@ router.get(
   })
 );
 
-// Refund transaction (admin-only)
+// Refund transaction (admin/manager, or cashier when allow_cashier_refund is on)
 router.post(
   '/:id/refund',
   catchAsync(async (req: Request, res: Response) => {
@@ -126,6 +154,10 @@ router.post(
       }
     }
 
+    // Tenant check (risk R2). A permitted cashier may still refund a colleague's sale
+    // in the same store, exactly as before.
+    await loadAccessibleTransaction(req, isSameStore);
+
     const result = await TransactionService.refundTransaction(
       req.params.id,
       reason || 'Customer request',
@@ -139,15 +171,22 @@ router.post(
   })
 );
 
-// Void transaction
+// Void transaction (admin / manager only — risk R3, decision D1)
 router.post(
   '/:id/void',
   catchAsync(async (req: Request, res: Response) => {
     const { voidReason } = req.body;
+    const user = (req as any).user;
+
+    if (!canVoidTransaction(user)) {
+      throw new AppError(403, 'Only managers and admins can void transactions');
+    }
 
     if (!voidReason) {
       throw new AppError(400, 'Void reason is required');
     }
+
+    await loadAccessibleTransaction(req);
 
     const result = await TransactionService.voidTransaction(
       req.params.id,

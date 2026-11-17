@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/errorHandler';
 import { logger } from '../utils/logger';
@@ -16,7 +17,7 @@ interface TransactionItemInput {
   labor_cost_override?: number;
 }
 
-interface CreateTransactionInput {
+export interface CreateTransactionInput {
   store_id: string;
   branch_id: string;
   user_id: string;
@@ -30,6 +31,9 @@ interface CreateTransactionInput {
   payment_splits?: { cash: number; card: number; transfer: number };
   items: TransactionItemInput[];
 }
+
+/** Input to the posting core: a fully-resolved sale with its pre-generated id + receipt number. */
+export type PostSaleInput = CreateTransactionInput & { id: string; receipt_number: string };
 
 export class TransactionService {
   static async createTransaction(input: CreateTransactionInput) {
@@ -52,157 +56,13 @@ export class TransactionService {
       const transactionId = uuidv4();
       const receiptNumber = `RCP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-      let paymentReference: string | null = null;
-      if (input.payment_method === 'split' && input.payment_splits) {
-        paymentReference = `Cash: ₦${Number(input.payment_splits.cash || 0).toLocaleString()}, Card: ₦${Number(input.payment_splits.card || 0).toLocaleString()}, Transfer: ₦${Number(input.payment_splits.transfer || 0).toLocaleString()}`;
-      }
-
-      // Start transaction
-      const transaction = await prisma.$transaction(async (tx) => {
-        // Create transaction
-        const createdTx = await tx.transaction.create({
-          data: {
-            id: transactionId,
-            store_id: input.store_id,
-            branch_id: input.branch_id,
-            user_id: input.user_id,
-            customer_id: input.customer_id,
-            offline_session_hash: input.offline_session_hash,
-            subtotal: input.subtotal,
-            tax_amount: input.tax_amount,
-            discount_amount: input.discount_amount,
-            total_amount: input.total_amount,
-            payment_method: input.payment_method,
-            payment_status: 'completed',
-            payment_reference: paymentReference,
-            payment_splits: input.payment_splits ? (input.payment_splits as any) : undefined,
-            receipt_number: receiptNumber,
-            is_sync_online: true,
-            synced_at: new Date(),
-            status: 'completed'
-          } as any
-        });
-
-        // Create transaction items and update inventory
-        for (const item of input.items) {
-          if (!Number.isFinite(item.quantity) || item.quantity <= 0) {
-            throw new AppError(400, 'Transaction item quantity must be a positive number');
-          }
-          // Item type is always resolved from the authoritative catalog record.
-          const product = await tx.product.findUnique({
-            where: { id: item.product_id },
-            include: { inventory: true }
-          });
-          if (!product) {
-            throw new AppError(400, 'Transaction contains an unavailable product');
-          }
-
-          let itemCost = 0;
-
-          if (product.item_type === 'PRODUCT') {
-            // 1. Product Cost: Direct snapshot of cost_price
-            itemCost = Number(product.cost_price || 0);
-
-            if (!product.inventory || Number(product.inventory.quantity_on_hand) < item.quantity) {
-              throw new AppError(400, `Insufficient stock for ${product.name}`);
-            }
-            // Deduct physical stock
-            await tx.inventory.update({
-              where: { product_id: item.product_id },
-              data: { quantity_on_hand: { decrement: item.quantity } }
-            });
-
-            await tx.inventoryMovement.create({
-              data: {
-                store_id: input.store_id,
-                branch_id: input.branch_id,
-                product_id: item.product_id,
-                movement_type: 'sale',
-                quantity: -item.quantity,
-                reference_id: transactionId,
-                notes: 'Sale transaction',
-                user_id: input.user_id
-              }
-            });
-          } else if (product.item_type === 'SERVICE') {
-            // 2. Service Cost: Parts + Labor
-            const components = await tx.serviceComponent.findMany({
-              where: { service_id: item.product_id },
-              include: { product: { include: { inventory: true } } }
-            });
-
-            for (const comp of components) {
-              if (comp.component_type === 'PART' && comp.product_id) {
-                const part = comp.product;
-                if (!part) throw new AppError(400, `Part ${comp.product_id} not found for service ${product.name}`);
-
-                const partQtyNeeded = Number(comp.quantity) * item.quantity;
-                if (!part.inventory || Number(part.inventory.quantity_on_hand) < partQtyNeeded) {
-                  throw new AppError(400, `Insufficient stock for part ${part.name} needed for service ${product.name}`);
-                }
-
-                // Deduct part stock
-                await tx.inventory.update({
-                  where: { product_id: part.id },
-                  data: { quantity_on_hand: { decrement: partQtyNeeded } }
-                });
-
-                await tx.inventoryMovement.create({
-                  data: {
-                    store_id: input.store_id,
-                    branch_id: input.branch_id,
-                    product_id: part.id,
-                    movement_type: 'sale',
-                    quantity: -partQtyNeeded,
-                    reference_id: transactionId,
-                    notes: `Part used for service: ${product.name}`,
-                    user_id: input.user_id
-                  }
-                });
-
-                itemCost += Number(part.cost_price || 0) * Number(comp.quantity);
-              } else if (comp.component_type === 'LABOR') {
-                // Labor cost (use override if provided, else default)
-                const laborCost = item.labor_cost_override ?? Number(comp.default_labor_cost || 0);
-                itemCost += laborCost;
-              }
-            }
-          }
-
-          await tx.transactionItem.create({
-            data: {
-              id: uuidv4(),
-              transaction_id: transactionId,
-              product_id: item.product_id,
-              quantity: item.quantity,
-              unit_price: item.unit_price,
-              cost_price: itemCost,
-              tax_amount: item.tax_amount,
-              discount_amount: item.discount_amount || 0,
-              line_total: item.line_total,
-              batch_id: item.batch_id
-            }
-          });
-        }
-
-        // Update customer stats if exists
-        if (input.customer_id) {
-          await tx.customer.update({
-            where: { id: input.customer_id },
-            data: {
-              total_spent: {
-                increment: input.total_amount
-              },
-              transaction_count: {
-                increment: 1
-              },
-              last_transaction_at: new Date()
-            }
-          });
-        }
-
-        return createdTx;
-      });
+      const transaction = await prisma.$transaction((tx) =>
+        TransactionService.postSale(tx, {
+          ...input,
+          id: transactionId,
+          receipt_number: receiptNumber
+        })
+      );
 
       if (input.discount_amount > 0) {
         await prisma.auditLog.create({
@@ -237,6 +97,182 @@ export class TransactionService {
         `Failed to create transaction: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
+  }
+
+  /**
+   * Decrement stock only if enough is on hand, in a single conditional UPDATE, so two
+   * concurrent sales cannot both pass a read-then-write check and drive stock negative
+   * (Bar/Lounge planning risk R7). Throws the same 400 the pre-check uses.
+   */
+  private static async decrementStock(
+    tx: Prisma.TransactionClient,
+    productId: string,
+    quantity: number,
+    insufficientMessage: string
+  ) {
+    const res = await tx.inventory.updateMany({
+      where: { product_id: productId, quantity_on_hand: { gte: quantity } },
+      data: { quantity_on_hand: { decrement: quantity } }
+    });
+    if (!res || res.count !== 1) {
+      throw new AppError(400, insufficientMessage);
+    }
+  }
+
+  /**
+   * The sale-posting core: writes the Transaction header, lines, stock decrements,
+   * `sale` InventoryMovements and customer stats, all on the caller's DB transaction
+   * client. It does NOT do idempotency lookups, audit or logging; `createTransaction`
+   * wraps it for retail, and Bar-mode fulfilment will call it inside its own atomic
+   * unit with a server-resolved seller (`user_id`) and server-computed totals.
+   */
+  static async postSale(tx: Prisma.TransactionClient, input: PostSaleInput) {
+    const transactionId = input.id;
+
+    let paymentReference: string | null = null;
+    if (input.payment_method === 'split' && input.payment_splits) {
+      paymentReference = `Cash: ₦${Number(input.payment_splits.cash || 0).toLocaleString()}, Card: ₦${Number(input.payment_splits.card || 0).toLocaleString()}, Transfer: ₦${Number(input.payment_splits.transfer || 0).toLocaleString()}`;
+    }
+
+    // Create transaction
+    const createdTx = await tx.transaction.create({
+      data: {
+        id: transactionId,
+        store_id: input.store_id,
+        branch_id: input.branch_id,
+        user_id: input.user_id,
+        customer_id: input.customer_id,
+        offline_session_hash: input.offline_session_hash,
+        subtotal: input.subtotal,
+        tax_amount: input.tax_amount,
+        discount_amount: input.discount_amount,
+        total_amount: input.total_amount,
+        payment_method: input.payment_method,
+        payment_status: 'completed',
+        payment_reference: paymentReference,
+        payment_splits: input.payment_splits ? (input.payment_splits as any) : undefined,
+        receipt_number: input.receipt_number,
+        is_sync_online: true,
+        synced_at: new Date(),
+        status: 'completed'
+      } as any
+    });
+
+    // Create transaction items and update inventory
+    for (const item of input.items) {
+      if (!Number.isFinite(item.quantity) || item.quantity <= 0) {
+        throw new AppError(400, 'Transaction item quantity must be a positive number');
+      }
+      // Item type is always resolved from the authoritative catalog record.
+      const product = await tx.product.findUnique({
+        where: { id: item.product_id },
+        include: { inventory: true }
+      });
+      if (!product) {
+        throw new AppError(400, 'Transaction contains an unavailable product');
+      }
+
+      let itemCost = 0;
+
+      if (product.item_type === 'PRODUCT') {
+        // 1. Product Cost: Direct snapshot of cost_price
+        itemCost = Number(product.cost_price || 0);
+
+        const insufficient = `Insufficient stock for ${product.name}`;
+        if (!product.inventory || Number(product.inventory.quantity_on_hand) < item.quantity) {
+          throw new AppError(400, insufficient);
+        }
+        // Deduct physical stock (guarded: fails instead of going negative under concurrency)
+        await TransactionService.decrementStock(tx, item.product_id, item.quantity, insufficient);
+
+        await tx.inventoryMovement.create({
+          data: {
+            store_id: input.store_id,
+            branch_id: input.branch_id,
+            product_id: item.product_id,
+            movement_type: 'sale',
+            quantity: -item.quantity,
+            reference_id: transactionId,
+            notes: 'Sale transaction',
+            user_id: input.user_id
+          }
+        });
+      } else if (product.item_type === 'SERVICE') {
+        // 2. Service Cost: Parts + Labor
+        const components = await tx.serviceComponent.findMany({
+          where: { service_id: item.product_id },
+          include: { product: { include: { inventory: true } } }
+        });
+
+        for (const comp of components) {
+          if (comp.component_type === 'PART' && comp.product_id) {
+            const part = comp.product;
+            if (!part) throw new AppError(400, `Part ${comp.product_id} not found for service ${product.name}`);
+
+            const partQtyNeeded = Number(comp.quantity) * item.quantity;
+            const insufficient = `Insufficient stock for part ${part.name} needed for service ${product.name}`;
+            if (!part.inventory || Number(part.inventory.quantity_on_hand) < partQtyNeeded) {
+              throw new AppError(400, insufficient);
+            }
+
+            // Deduct part stock (guarded)
+            await TransactionService.decrementStock(tx, part.id, partQtyNeeded, insufficient);
+
+            await tx.inventoryMovement.create({
+              data: {
+                store_id: input.store_id,
+                branch_id: input.branch_id,
+                product_id: part.id,
+                movement_type: 'sale',
+                quantity: -partQtyNeeded,
+                reference_id: transactionId,
+                notes: `Part used for service: ${product.name}`,
+                user_id: input.user_id
+              }
+            });
+
+            itemCost += Number(part.cost_price || 0) * Number(comp.quantity);
+          } else if (comp.component_type === 'LABOR') {
+            // Labor cost (use override if provided, else default)
+            const laborCost = item.labor_cost_override ?? Number(comp.default_labor_cost || 0);
+            itemCost += laborCost;
+          }
+        }
+      }
+
+      await tx.transactionItem.create({
+        data: {
+          id: uuidv4(),
+          transaction_id: transactionId,
+          product_id: item.product_id,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          cost_price: itemCost,
+          tax_amount: item.tax_amount,
+          discount_amount: item.discount_amount || 0,
+          line_total: item.line_total,
+          batch_id: item.batch_id
+        }
+      });
+    }
+
+    // Update customer stats if exists
+    if (input.customer_id) {
+      await tx.customer.update({
+        where: { id: input.customer_id },
+        data: {
+          total_spent: {
+            increment: input.total_amount
+          },
+          transaction_count: {
+            increment: 1
+          },
+          last_transaction_at: new Date()
+        }
+      });
+    }
+
+    return createdTx;
   }
 
   static async batchSyncTransactions(transactions: CreateTransactionInput[]) {
@@ -465,6 +501,9 @@ export class TransactionService {
       // Log audit
       await prisma.auditLog.create({
         data: {
+          // store/branch are required for the row to appear in the store's audit view (risk R6)
+          store_id: transaction.store_id,
+          branch_id: transaction.branch_id,
           user_id: voidedByUserId,
           action: 'VOID_TRANSACTION',
           resource_type: 'transaction',
@@ -560,6 +599,8 @@ export class TransactionService {
 
       await prisma.auditLog.create({
         data: {
+          store_id: transaction.store_id,
+          branch_id: transaction.branch_id,
           user_id: refundedByUserId,
           action: 'REFUND_TRANSACTION',
           resource_type: 'transaction',

@@ -102,6 +102,9 @@ beforeEach(() => {
   // Idempotency guard defaults to "no existing tx" so createTransaction proceeds.
   mockPrisma.transaction.findFirst.mockResolvedValue(null);
   mockPrisma.transaction.create.mockResolvedValue({ id: 'tx-new', status: 'completed' });
+  // Guarded stock decrement succeeds by default; service components default to none.
+  mockPrisma.inventory.updateMany.mockResolvedValue({ count: 1 });
+  mockPrisma.serviceComponent.findMany.mockResolvedValue([]);
 });
 
 describe('TransactionService.createTransaction', () => {
@@ -143,9 +146,9 @@ describe('TransactionService.createTransaction', () => {
     // Both lines are recorded...
     expect(mockPrisma.transactionItem.create).toHaveBeenCalledTimes(2);
     // ...but only the PRODUCT moves inventory.
-    expect(mockPrisma.inventory.update).toHaveBeenCalledTimes(1);
-    expect(mockPrisma.inventory.update).toHaveBeenCalledWith({
-      where: { product_id: 'prod-1' },
+    expect(mockPrisma.inventory.updateMany).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.inventory.updateMany).toHaveBeenCalledWith({
+      where: { product_id: 'prod-1', quantity_on_hand: { gte: 2 } },
       data: { quantity_on_hand: { decrement: 2 } },
     });
     expect(mockPrisma.inventoryMovement.create).toHaveBeenCalledTimes(1);
@@ -156,8 +159,8 @@ describe('TransactionService.createTransaction', () => {
       quantity: -2,
     });
     // The service product_id never touched inventory.
-    expect(mockPrisma.inventory.update).not.toHaveBeenCalledWith(
-      expect.objectContaining({ where: { product_id: 'svc-1' } })
+    expect(mockPrisma.inventory.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ product_id: 'svc-1' }) })
     );
   });
 
@@ -168,8 +171,8 @@ describe('TransactionService.createTransaction', () => {
       makeInput({ items: [makeItem({ product_id: 'prod-1', quantity: qty })] })
     );
 
-    expect(mockPrisma.inventory.update).toHaveBeenCalledWith({
-      where: { product_id: 'prod-1' },
+    expect(mockPrisma.inventory.updateMany).toHaveBeenCalledWith({
+      where: { product_id: 'prod-1', quantity_on_hand: { gte: qty } },
       data: { quantity_on_hand: { decrement: qty } },
     });
     expect(mockPrisma.inventoryMovement.create.mock.calls[0][0].data.quantity).toBe(-qty);
@@ -185,7 +188,7 @@ describe('TransactionService.createTransaction', () => {
     expect(err).toBeInstanceOf(AppError);
     expect(err.statusCode).toBe(400);
     expect(err.message).toMatch(/insufficient stock/i);
-    expect(mockPrisma.inventory.update).not.toHaveBeenCalled();
+    expect(mockPrisma.inventory.updateMany).not.toHaveBeenCalled();
     expect(mockPrisma.inventoryMovement.create).not.toHaveBeenCalled();
   });
 
@@ -198,8 +201,8 @@ describe('TransactionService.createTransaction', () => {
 
     // The line is recorded and stock is deducted from that product's own inventory.
     expect(mockPrisma.transactionItem.create).toHaveBeenCalled();
-    expect(mockPrisma.inventory.update).toHaveBeenCalledWith({
-      where: { product_id: 'prod-1' },
+    expect(mockPrisma.inventory.updateMany).toHaveBeenCalledWith({
+      where: { product_id: 'prod-1', quantity_on_hand: { gte: 1 } },
       data: { quantity_on_hand: { decrement: 1 } },
     });
   });
@@ -245,6 +248,43 @@ describe('TransactionService.createTransaction', () => {
     });
   });
 
+  it('guarded decrement: a concurrent sale that drained stock fails cleanly with no movement (risk R7)', async () => {
+    // Pre-check sees 100 on hand, but the conditional UPDATE matches no row
+    // (another sale took the stock first).
+    seedCatalog({ 'prod-1': productRow() });
+    mockPrisma.inventory.updateMany.mockResolvedValue({ count: 0 });
+
+    const err: any = await TransactionService.createTransaction(
+      makeInput({ items: [makeItem({ product_id: 'prod-1', quantity: 3 })] })
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(AppError);
+    expect(err.statusCode).toBe(400);
+    expect(err.message).toMatch(/insufficient stock for widget/i);
+    expect(mockPrisma.inventoryMovement.create).not.toHaveBeenCalled();
+  });
+
+  it('guarded decrement also protects SERVICE part components', async () => {
+    seedCatalog({ 'svc-1': serviceRow() });
+    mockPrisma.serviceComponent.findMany.mockResolvedValue([
+      {
+        component_type: 'PART',
+        product_id: 'part-1',
+        quantity: new Prisma.Decimal('2'),
+        product: { id: 'part-1', name: 'Bracket', cost_price: 5, inventory: { quantity_on_hand: new Prisma.Decimal('10') } },
+      },
+    ]);
+
+    await TransactionService.createTransaction(
+      makeInput({ items: [makeItem({ product_id: 'svc-1', quantity: 3 })] })
+    );
+
+    expect(mockPrisma.inventory.updateMany).toHaveBeenCalledWith({
+      where: { product_id: 'part-1', quantity_on_hand: { gte: 6 } },
+      data: { quantity_on_hand: { decrement: 6 } },
+    });
+  });
+
   it('writes an audit log only when a discount is applied', async () => {
     seedCatalog({ 'prod-1': productRow() });
 
@@ -262,6 +302,46 @@ describe('TransactionService.createTransaction', () => {
     );
     expect(mockPrisma.auditLog.create).toHaveBeenCalledTimes(1);
     expect(mockPrisma.auditLog.create.mock.calls[0][0].data.action).toBe('APPLY_DISCOUNT');
+  });
+});
+
+describe('TransactionService.postSale (posting core)', () => {
+  it('posts with exactly the seller, id and receipt number it is given, on the supplied tx client', async () => {
+    seedCatalog({ 'prod-1': productRow() });
+
+    await TransactionService.postSale(mockPrisma as any, {
+      ...makeInput({ user_id: 'attendant-7', items: [makeItem({ product_id: 'prod-1', quantity: 2 })] }),
+      id: 'fixed-id',
+      receipt_number: 'RCP-FIXED',
+    });
+
+    const header = mockPrisma.transaction.create.mock.calls[0][0].data;
+    expect(header).toMatchObject({
+      id: 'fixed-id',
+      receipt_number: 'RCP-FIXED',
+      user_id: 'attendant-7',
+      status: 'completed',
+      payment_status: 'completed',
+    });
+    // Movement is attributed to the same seller and references the sale.
+    expect(mockPrisma.inventoryMovement.create.mock.calls[0][0].data).toMatchObject({
+      user_id: 'attendant-7',
+      reference_id: 'fixed-id',
+      movement_type: 'sale',
+    });
+    // The core does no idempotency lookup, audit or own $transaction.
+    expect(mockPrisma.transaction.findFirst).not.toHaveBeenCalled();
+    expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('createTransaction runs postSale inside a single $transaction', async () => {
+    seedCatalog({ 'prod-1': productRow() });
+    await TransactionService.createTransaction(
+      makeInput({ items: [makeItem({ product_id: 'prod-1' })] })
+    );
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.transaction.create).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -297,6 +377,16 @@ describe('TransactionService.voidTransaction', () => {
       expect.objectContaining({ where: { id: 'tx-1' }, data: expect.objectContaining({ status: 'voided' }) })
     );
     expect(mockPrisma.auditLog.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('stamps the void audit row with the sale store/branch so the store audit view shows it (risk R6)', async () => {
+    mockPrisma.transaction.findUnique.mockResolvedValue(voidableTx());
+    await TransactionService.voidTransaction('tx-1', 'wrong item', 'user-1');
+    expect(mockPrisma.auditLog.create.mock.calls[0][0].data).toMatchObject({
+      store_id: 'store-1',
+      branch_id: 'branch-1',
+      action: 'VOID_TRANSACTION',
+    });
   });
 
   it('throws for a non-existent transaction', async () => {
@@ -343,6 +433,16 @@ describe('TransactionService.refundTransaction', () => {
     expect(mockPrisma.transaction.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'refunded' }) })
     );
+  });
+
+  it('stamps the refund audit row with the sale store/branch (risk R6)', async () => {
+    mockPrisma.transaction.findUnique.mockResolvedValue(refundableTx());
+    await TransactionService.refundTransaction('tx-1', 'customer request', 'user-1');
+    const audit = mockPrisma.auditLog.create.mock.calls[0][0].data;
+    expect(audit.action).toBe('REFUND_TRANSACTION');
+    expect(audit.store_id).toBe(refundableTx().store_id);
+    expect(audit.branch_id).toBe(refundableTx().branch_id);
+    expect(audit.store_id).toBeTruthy();
   });
 
   it('does not touch customer stats when there is no customer', async () => {

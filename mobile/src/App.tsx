@@ -136,6 +136,8 @@ import BarDashboardScreen from './screens/BarDashboardScreen';
 import BarDamageScreen from './screens/BarDamageScreen';
 import BarDayCloseScreen from './screens/BarDayCloseScreen';
 import BarHandoverScreen from './screens/BarHandoverScreen';
+import BarReportsScreen from './screens/BarReportsScreen';
+import BarCommissionScreen from './screens/BarCommissionScreen';
 import { useBusinessMode } from './hooks/useBusinessMode';
 import EmployeeSalesScreen from './screens/EmployeeSalesScreen';
 import AlertsScreen from './screens/AlertsScreen';
@@ -254,6 +256,9 @@ function TabletNavigationRoot() {
         <Stack.Screen name="BarDamage" component={BarDamageScreen} />
         <Stack.Screen name="BarDayClose" component={BarDayCloseScreen} />
         <Stack.Screen name="BarHandover" component={BarHandoverScreen} />
+        {/* Bar / Lounge reports + commission (Phase 5) */}
+        <Stack.Screen name="BarReports" component={BarReportsScreen} />
+        <Stack.Screen name="BarCommission" component={BarCommissionScreen} />
         <Stack.Screen name="Alerts" component={AlertsScreen} />
         {/* Super-admin only: gating is enforced at the screen entry point */}
         <Stack.Screen name="AdminSubscriptions" component={AdminSubscriptionsScreen} />
@@ -512,6 +517,9 @@ function AuthenticatedRoot() {
       <Stack.Screen name="BarDamage" component={BarDamageScreen} />
       <Stack.Screen name="BarDayClose" component={BarDayCloseScreen} />
       <Stack.Screen name="BarHandover" component={BarHandoverScreen} />
+      {/* Bar / Lounge reports + commission (Phase 5) */}
+      <Stack.Screen name="BarReports" component={BarReportsScreen} />
+      <Stack.Screen name="BarCommission" component={BarCommissionScreen} />
       <Stack.Screen name="Alerts" component={AlertsScreen} />
       {/* Super-admin only: gating is enforced at the screen entry point */}
       <Stack.Screen

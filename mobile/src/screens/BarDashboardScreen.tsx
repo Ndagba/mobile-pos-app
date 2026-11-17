@@ -112,6 +112,16 @@ export default function BarDashboardScreen() {
                 </Button>
               ) : null}
             </View>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+              <Button mode="outlined" icon="chart-box-outline" style={{ flex: 1 }} onPress={() => navigation.navigate('BarReports')}>
+                Reports
+              </Button>
+              {can('bar.commission.manage') && (
+                <Button mode="outlined" icon="percent-outline" style={{ flex: 1 }} onPress={() => navigation.navigate('BarCommission')}>
+                  Commission
+                </Button>
+              )}
+            </View>
             {t.reversal_requests > 0 && can('bar.reversal.approve') && (
               <TouchableOpacity style={styles.notice} onPress={() => navigation.navigate('BarOrders', { mode: 'queue', tab: 'reversals' })}>
                 <MaterialCommunityIcons name="undo-variant" size={18} color="#B45309" />

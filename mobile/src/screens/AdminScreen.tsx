@@ -152,6 +152,20 @@ export default function AdminScreen() {
               color="#FB7185"
               onPress={() => navigation.navigate('BarDamage')}
             />
+            <AdminMenuItem
+              icon="chart-box-outline"
+              title="Bar: Reports"
+              description="Sales, hand-overs, balances, damages, commission, handovers — with CSV export"
+              color="#3B82F6"
+              onPress={() => navigation.navigate('BarReports')}
+            />
+            <AdminMenuItem
+              icon="percent-outline"
+              title="Bar: Commission"
+              description="Calculate, post to expenses and pay Attendant commission"
+              color="#8B5CF6"
+              onPress={() => navigation.navigate('BarCommission')}
+            />
           </>
         )}
       </ScrollView>

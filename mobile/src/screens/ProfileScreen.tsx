@@ -154,6 +154,20 @@ export default function ProfileScreen() {
                   <MaterialCommunityIcons name="chevron-right" size={20} color={C.muted} />
                 </TouchableOpacity>
               )}
+              {isBar && (
+                <TouchableOpacity
+                  style={[styles.card, styles.linkRow, { marginTop: 10 }]}
+                  activeOpacity={0.75}
+                  onPress={() => navigation.navigate('BarReports')}
+                >
+                  <MaterialCommunityIcons name="chart-box-outline" size={20} color={C.accent} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.linkTitle}>Bar: Reports & commission</Text>
+                    <Text style={styles.muted}>Ten bar reports with CSV export</Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={20} color={C.muted} />
+                </TouchableOpacity>
+              )}
             </>
           )}
 

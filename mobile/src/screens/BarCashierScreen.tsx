@@ -8,6 +8,7 @@ import {
   DAMAGE_REASON_LABELS,
   LEDGER_ENTRY_LABELS,
   type DamageList,
+  type MyCommissionLine,
   REMITTANCE_METHOD_LABELS,
   describeBalance,
   type CashierRemittance,
@@ -56,9 +57,11 @@ export default function BarCashierScreen() {
   const [busy, setBusy] = useState(false);
 
   const [damages, setDamages] = useState<DamageList | null>(null);
+  const [commission, setCommission] = useState<MyCommissionLine[]>([]);
 
   const load = useCallback(async () => {
     if (self) barApi.myDamages().then(setDamages).catch(() => {}); // information only (D24)
+    if (self) barApi.myCommission().then(setCommission).catch(() => {}); // Phase 5
     try {
       const [s, r, l] = self
         ? await Promise.all([barApi.mySummary(date), barApi.myRemittances(), barApi.myLedger()])
@@ -217,6 +220,24 @@ export default function BarCashierScreen() {
             </View>
           ))}
         </View>
+
+        {/* My commission (Phase 5): calculated ≠ paid */}
+        {self && commission.length > 0 && (
+          <>
+            <Text style={styles.section}>My commission</Text>
+            <View style={styles.card}>
+              {commission.slice(0, 12).map((c) => (
+                <View key={c.id} style={styles.row}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rowTitle}>{c.period_start} – {c.period_end}</Text>
+                    <Text style={styles.muted}>{c.rate}% of {naira(c.eligible_sales)} · {c.payment_status === 'paid' ? 'Paid' : 'Not paid yet'}</Text>
+                  </View>
+                  <Text style={[styles.amount, { color: c.payment_status === 'paid' ? '#047857' : C.ink }]}>{naira(c.commission_amount)}</Text>
+                </View>
+              ))}
+            </View>
+          </>
+        )}
 
         {/* Damages naming me (Phase 4) — information only, never charged */}
         {self && damages && damages.items.length > 0 && (

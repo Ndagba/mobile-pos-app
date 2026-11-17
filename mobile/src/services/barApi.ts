@@ -4,6 +4,10 @@ import type {
   BarPaymentMethod,
   CashierRemittance,
   CashierSummary,
+  CommissionRun,
+  MyCommissionLine,
+  ReportCatalog,
+  ReportTable,
   DamageList,
   DamageReason,
   DamageRecord,
@@ -262,5 +266,47 @@ export const barApi = {
   async reopenDayClose(id: string, reason: string): Promise<DayClose> {
     requireOnline();
     return asObject(await ApiClient.post(`/bar/day-close/${id}/reopen`, { reason }), 'counted_cash');
+  },
+
+  // ── Commission (Phase 5) ──
+  async commissionRuns(status?: string): Promise<CommissionRun[]> {
+    return asList(await ApiClient.get(`/bar/commission${query({ status })}`));
+  },
+
+  async commissionRun(id: string): Promise<CommissionRun> {
+    return asObject(await ApiClient.get(`/bar/commission/${id}`), 'lines');
+  },
+
+  async draftCommission(body: { period_start: string; period_end: string; branch_id?: string }): Promise<CommissionRun> {
+    requireOnline();
+    return asObject(await ApiClient.post('/bar/commission', body), 'lines');
+  },
+
+  async postCommission(id: string): Promise<CommissionRun> {
+    requireOnline();
+    return asObject(await ApiClient.post(`/bar/commission/${id}/post`, {}), 'lines');
+  },
+
+  async cancelCommission(id: string, reason: string): Promise<CommissionRun> {
+    requireOnline();
+    return asObject(await ApiClient.post(`/bar/commission/${id}/cancel`, { reason }), 'lines');
+  },
+
+  async payCommissionLine(lineId: string, method: RemittanceMethod, reference?: string): Promise<CommissionRun> {
+    requireOnline();
+    return asObject(await ApiClient.post(`/bar/commission/lines/${lineId}/pay`, { method, reference }), 'lines');
+  },
+
+  async myCommission(): Promise<MyCommissionLine[]> {
+    return asList(await ApiClient.get('/bar/me/commission'));
+  },
+
+  // ── Reports (Phase 5) ──
+  async reportCatalog(): Promise<ReportCatalog> {
+    return asObject(await ApiClient.get('/bar/reports'), 'reports');
+  },
+
+  async report(key: string, from?: string, to?: string): Promise<ReportTable> {
+    return asObject(await ApiClient.get(`/bar/reports/${key}${query({ from, to })}`), 'columns');
   },
 };

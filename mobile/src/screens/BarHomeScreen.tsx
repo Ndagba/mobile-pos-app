@@ -66,7 +66,7 @@ export default function BarHomeScreen() {
             <View style={styles.notice}>
               <MaterialCommunityIcons name="rocket-launch-outline" size={16} color={C.accent} />
               <Text style={[styles.body, { flex: 1 }]}>
-                These bar screens are arriving in the next app updates.
+                Payments, balances and day close arrive in the next app updates.
               </Text>
             </View>
           </>
@@ -78,6 +78,19 @@ export default function BarHomeScreen() {
         )}
       </View>
 
+      {/* Phase 2 actions */}
+      {profile === 'bar_attendant' && (
+        <View style={styles.actions}>
+          <ActionTile icon="cart-plus" label="New order" primary onPress={() => navigation.navigate('BarNewOrder')} />
+          <ActionTile icon="format-list-checks" label="My orders" onPress={() => navigation.navigate('BarOrders', { mode: 'mine' })} />
+        </View>
+      )}
+      {profile === 'bar_controller' && (
+        <View style={styles.actions}>
+          <ActionTile icon="inbox-arrow-down" label="Order queue" primary onPress={() => navigation.navigate('BarOrders', { mode: 'queue' })} />
+        </View>
+      )}
+
       {canRetailCheckout && (
         <TouchableOpacity style={styles.cta} activeOpacity={0.85} onPress={() => navigation.navigate('Checkout')}>
           <MaterialCommunityIcons name="cart-outline" size={18} color={C.accentFg} />
@@ -88,7 +101,26 @@ export default function BarHomeScreen() {
   );
 }
 
+function ActionTile({ icon, label, primary, onPress }: { icon: string; label: string; primary?: boolean; onPress: () => void }) {
+  return (
+    <TouchableOpacity
+      style={[styles.tile, primary && styles.tilePrimary]}
+      activeOpacity={0.85}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <MaterialCommunityIcons name={icon as any} size={24} color={primary ? C.accentFg : C.accent} />
+      <Text style={[styles.tileText, primary && { color: C.accentFg }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 const styles = StyleSheet.create({
+  actions: { flexDirection: 'row', gap: 12, marginTop: 16 },
+  tile: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 22, borderRadius: 16, backgroundColor: C.card, borderWidth: 1, borderColor: C.border },
+  tilePrimary: { backgroundColor: C.accent, borderColor: C.accent },
+  tileText: { fontSize: 15, fontWeight: '800', color: C.ink },
   screen: { flex: 1, backgroundColor: C.bg },
   content: { paddingHorizontal: 16, paddingBottom: 120 },
   eyebrow: { fontSize: 12, fontWeight: '700', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.5 },

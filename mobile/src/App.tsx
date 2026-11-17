@@ -127,6 +127,9 @@ import BatchesScreen from './screens/BatchesScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import BarSetupScreen from './screens/BarSetupScreen';
 import BarHomeScreen from './screens/BarHomeScreen';
+import BarNewOrderScreen from './screens/BarNewOrderScreen';
+import BarOrdersScreen from './screens/BarOrdersScreen';
+import BarOrderDetailScreen from './screens/BarOrderDetailScreen';
 import { useBusinessMode } from './hooks/useBusinessMode';
 import EmployeeSalesScreen from './screens/EmployeeSalesScreen';
 import AlertsScreen from './screens/AlertsScreen';
@@ -233,6 +236,10 @@ function TabletNavigationRoot() {
         <Stack.Screen name="Profile" component={ProfileScreen} />
         {/* Admin + manager: Bar / Lounge setup (screen re-checks the role) */}
         <Stack.Screen name="BarSetup" component={BarSetupScreen} />
+        {/* Bar / Lounge orders (Phase 2): each screen re-checks bar capabilities */}
+        <Stack.Screen name="BarNewOrder" component={BarNewOrderScreen} />
+        <Stack.Screen name="BarOrders" component={BarOrdersScreen} />
+        <Stack.Screen name="BarOrderDetail" component={BarOrderDetailScreen} />
         <Stack.Screen name="Alerts" component={AlertsScreen} />
         {/* Super-admin only: gating is enforced at the screen entry point */}
         <Stack.Screen name="AdminSubscriptions" component={AdminSubscriptionsScreen} />
@@ -479,6 +486,10 @@ function AuthenticatedRoot() {
       <Stack.Screen name="Profile" component={ProfileScreen} />
       {/* Admin + manager: Bar / Lounge setup (screen re-checks the role) */}
       <Stack.Screen name="BarSetup" component={BarSetupScreen} />
+      {/* Bar / Lounge orders (Phase 2): each screen re-checks bar capabilities */}
+      <Stack.Screen name="BarNewOrder" component={BarNewOrderScreen} />
+      <Stack.Screen name="BarOrders" component={BarOrdersScreen} />
+      <Stack.Screen name="BarOrderDetail" component={BarOrderDetailScreen} />
       <Stack.Screen name="Alerts" component={AlertsScreen} />
       {/* Super-admin only: gating is enforced at the screen entry point */}
       <Stack.Screen

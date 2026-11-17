@@ -271,6 +271,9 @@ export default function AuthScreen() {
             // Preserve the super-admin flag across cached restores —
             // otherwise a returning user loses access to /admin tooling.
             is_super_admin: u.is_super_admin ?? false,
+            // Bar/Lounge: refreshed from /auth/me once online.
+            operational_profile: u.operational_profile ?? null,
+            business_mode: u.business_mode === 'bar' ? 'bar' : 'retail',
           },
           access_token:  token,
           refresh_token: refreshToken ?? '',

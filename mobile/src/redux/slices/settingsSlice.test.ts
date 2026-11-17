@@ -26,6 +26,31 @@ describe('normalizeStoreSettings', () => {
   });
 });
 
+describe('normalizeStoreSettings — business mode (Bar/Lounge Phase 1)', () => {
+  it('defaults existing stores to retail, unlocked, with bar defaults', () => {
+    const s = normalizeStoreSettings({});
+    expect(s.business_mode).toBe('retail');
+    expect(s.business_mode_locked).toBe(false);
+    expect(s.bar_business_day_cutoff_hour).toBe(6);
+    expect(s.bar_timezone).toBe('Africa/Lagos');
+    expect(s.commission_enabled).toBe(false);
+    expect(s.commission_rate).toBeNull();
+    expect(s.commission_basis).toBe('total_sales');
+  });
+
+  it('reads bar mode and coerces the Decimal commission rate', () => {
+    const s = normalizeStoreSettings({ business_mode: 'bar', business_mode_locked: true, commission_rate: '5.00', bar_business_day_cutoff_hour: 0 });
+    expect(s.business_mode).toBe('bar');
+    expect(s.business_mode_locked).toBe(true);
+    expect(s.commission_rate).toBe(5);
+    expect(s.bar_business_day_cutoff_hour).toBe(0);
+  });
+
+  it('treats an unknown mode as retail', () => {
+    expect(normalizeStoreSettings({ business_mode: 'nightclub' }).business_mode).toBe('retail');
+  });
+});
+
 describe('setStoreSettings', () => {
   it('merges, so a four-flag update does not wipe the cashier sales rules', () => {
     let state = reducer(undefined, setStoreSettings(normalizeStoreSettings({ max_discount_percent: 10, allow_cashier_refund: true })));

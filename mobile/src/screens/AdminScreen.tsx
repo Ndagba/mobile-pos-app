@@ -111,6 +111,15 @@ export default function AdminScreen() {
           color="#8B5CF6"
           onPress={() => navigation.navigate('AuditLogs')}
         />
+
+        <Text style={styles.sectionTitle}>Store</Text>
+        <AdminMenuItem
+          icon="glass-mug-variant"
+          title="Bar / Lounge setup"
+          description="Business mode, bar settings, commission and cashier bar profiles"
+          color="#F59E0B"
+          onPress={() => navigation.navigate('BarSetup')}
+        />
       </ScrollView>
     </View>
   );

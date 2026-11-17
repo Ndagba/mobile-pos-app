@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, Alert, KeyboardAvoidingView, Platform,
+  View, Text, StyleSheet, ScrollView, Alert, KeyboardAvoidingView, Platform, TouchableOpacity,
 } from 'react-native';
 import { Button, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -8,7 +8,9 @@ import { useNavigation } from '@react-navigation/native';
 import { useSelector } from 'react-redux';
 import * as SecureStore from 'expo-secure-store';
 
+import { OPERATIONAL_PROFILE_LABELS } from '@jaypos/shared';
 import { RootState } from '../redux/store';
+import { useBusinessMode } from '../hooks/useBusinessMode';
 import ApiClient from '../services/ApiClient';
 import { C } from '../theme';
 import {
@@ -29,6 +31,7 @@ export default function ProfileScreen() {
   const online = useIsOnline();
   const user = useSelector((s: RootState) => s.auth.user);
 
+  const { isBar, profile, canOpenBarSetup } = useBusinessMode();
   const canChangePassword = user?.role === 'admin' || user?.role === 'manager' || !!user?.is_super_admin;
 
   const [pw, setPw] = useState('');
@@ -96,6 +99,9 @@ export default function ProfileScreen() {
             <View style={styles.details}>
               <Detail label="Branch" value={user?.branch_name || '—'} />
               <Detail label="Store" value={user?.store_id || '—'} />
+              {isBar && !canOpenBarSetup && (
+                <Detail label="Bar duty" value={profile ? OPERATIONAL_PROFILE_LABELS[profile] : 'Not assigned'} />
+              )}
               <Detail label="Account ID" value={user?.id || '—'} mono />
             </View>
             <View style={styles.noteRow}>
@@ -103,6 +109,25 @@ export default function ProfileScreen() {
               <Text style={styles.muted}>Editing your name, email and phone isn't available yet.</Text>
             </View>
           </View>
+
+          {/* Bar / Lounge setup — phone entry point (tablets also reach it from Admin) */}
+          {canOpenBarSetup && (
+            <>
+              <Text style={styles.section}>Store</Text>
+              <TouchableOpacity
+                style={[styles.card, styles.linkRow]}
+                activeOpacity={0.75}
+                onPress={() => navigation.navigate('BarSetup')}
+              >
+                <MaterialCommunityIcons name="glass-mug-variant" size={20} color={C.accent} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.linkTitle}>Bar / Lounge setup</Text>
+                  <Text style={styles.muted}>Business mode, bar settings and cashier bar profiles</Text>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={20} color={C.muted} />
+              </TouchableOpacity>
+            </>
+          )}
 
           {/* Security */}
           <Text style={styles.section}>Change password</Text>
@@ -203,4 +228,6 @@ const styles = StyleSheet.create({
   detailValue: { flexShrink: 1, fontSize: 13, fontWeight: '600', color: C.ink, textAlign: 'right' },
   noteRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginTop: 8 },
   dot: { width: 8, height: 8, borderRadius: 4 },
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  linkTitle: { fontSize: 14, fontWeight: '700', color: C.ink, marginBottom: 2 },
 });

@@ -18,6 +18,7 @@ import { SyncManager } from './services/SyncManager';
 import NotificationService from './services/NotificationService';
 import { setConnected, setLastSyncAt, setSyncMode, clearSyncQueue } from './redux/slices/syncSlice';
 import { setStoreSettings, normalizeStoreSettings } from './redux/slices/settingsSlice';
+import { updateUser } from './redux/slices/authSlice';
 import FloatingTabBar from './components/ui/FloatingTabBar';
 import { useResponsive, responsiveSpacing, responsiveFontSize } from './utils/responsiveDesign';
 import { C } from './theme';
@@ -70,6 +71,23 @@ async function prefetchSettings() {
   }
 }
 
+// Refresh the signed-in user's bar profile + store mode (Bar/Lounge Phase 1).
+// They can change after login (admin assigns a profile, store switches mode);
+// the server is the authority, this only keeps the UI in step.
+async function refreshUserModeContext() {
+  try {
+    const res: any = await ApiClient.get('/auth/me');
+    const me = res?.data ?? res;
+    if (!me || typeof me !== 'object' || !('business_mode' in me)) return; // offline echo / old server
+    store.dispatch(updateUser({
+      operational_profile: me.operational_profile ?? null,
+      business_mode: me.business_mode === 'bar' ? 'bar' : 'retail',
+    }));
+  } catch {
+    // offline — keep the cached values
+  }
+}
+
 // Cache customers locally so the Customers screen works with no connection.
 async function prefetchCustomers() {
   try {
@@ -107,6 +125,9 @@ import ProfitLossScreen from './screens/ProfitLossScreen';
 import InventoryTurnoverScreen from './screens/InventoryTurnoverScreen';
 import BatchesScreen from './screens/BatchesScreen';
 import ProfileScreen from './screens/ProfileScreen';
+import BarSetupScreen from './screens/BarSetupScreen';
+import BarHomeScreen from './screens/BarHomeScreen';
+import { useBusinessMode } from './hooks/useBusinessMode';
 import EmployeeSalesScreen from './screens/EmployeeSalesScreen';
 import AlertsScreen from './screens/AlertsScreen';
 
@@ -126,6 +147,10 @@ function MainTabs() {
   const settings = useSelector((state: RootState) => state.settings.settings);
   const role = auth.user?.role ?? 'cashier';
   const allowedTabs = ROLE_TABS[role] ?? ROLE_TABS['cashier'];
+  // Bar/Lounge: cashiers in a bar store get the bar home instead of the retail
+  // dashboard; Attendants can't open the retail checkout.
+  const { isBarCashier, canRetailCheckout } = useBusinessMode();
+  const HomeScreen = isBarCashier ? BarHomeScreen : DashboardScreen;
   const can = (tab: string) => {
     if (tab === 'Customers') {
       const isEnabled = settings?.customer_menu_enabled ?? true;
@@ -148,7 +173,7 @@ function MainTabs() {
         tabBarStyle: { display: 'none' },
       }}
     >
-      <Tab.Screen name="Dashboard" component={DashboardScreen} />
+      <Tab.Screen name="Dashboard" component={HomeScreen} />
       {can('Inventory') && (
         <Tab.Screen name="Inventory" component={InventoryScreen} />
       )}
@@ -206,6 +231,8 @@ function TabletNavigationRoot() {
         <Stack.Screen name="EmployeeSales" component={EmployeeSalesScreen} />
         {/* Every role: account overview + own password (admin/manager) */}
         <Stack.Screen name="Profile" component={ProfileScreen} />
+        {/* Admin + manager: Bar / Lounge setup (screen re-checks the role) */}
+        <Stack.Screen name="BarSetup" component={BarSetupScreen} />
         <Stack.Screen name="Alerts" component={AlertsScreen} />
         {/* Super-admin only: gating is enforced at the screen entry point */}
         <Stack.Screen name="AdminSubscriptions" component={AdminSubscriptionsScreen} />
@@ -224,6 +251,10 @@ function TabletMainContent({ navigation }: any) {
   const role = auth.user?.role ?? 'cashier';
   const settings = useSelector((state: RootState) => state.settings.settings);
   const allowedTabs = ROLE_TABS[role] ?? ROLE_TABS['cashier'];
+  // Bar/Lounge: cashiers in a bar store get the bar home instead of the retail
+  // dashboard; Attendants can't open the retail checkout.
+  const { isBarCashier, canRetailCheckout } = useBusinessMode();
+  const HomeScreen = isBarCashier ? BarHomeScreen : DashboardScreen;
   const can = (tab: string) => {
     if (tab === 'Customers') {
       const isEnabled = settings?.customer_menu_enabled ?? true;
@@ -240,7 +271,7 @@ function TabletMainContent({ navigation }: any) {
   // Tab config with components — Dashboard and Settings are always available;
   // the rest are gated by role.
   const tabScreens = [
-    { name: 'Dashboard', component: DashboardScreen },
+    { name: 'Dashboard', component: HomeScreen },
     ...(can('Inventory') ? [{ name: 'Inventory', component: InventoryScreen }] : []),
     ...(can('Customers') ? [{ name: 'Customers', component: CustomersScreen }] : []),
     ...(can('Suppliers') ? [{ name: 'Suppliers', component: SuppliersScreen }] : []),
@@ -277,7 +308,8 @@ function TabletMainContent({ navigation }: any) {
           paddingHorizontal: spacing.sm,
         }}
       >
-        {/* "New Sale" CTA — the equivalent of the FAB on phone */}
+        {/* "New Sale" CTA — the equivalent of the FAB on phone (hidden for bar Attendants) */}
+        {canRetailCheckout && (
         <TouchableOpacity
           onPress={openCheckout}
           activeOpacity={0.85}
@@ -320,6 +352,7 @@ function TabletMainContent({ navigation }: any) {
             </Text>
           </LinearGradient>
         </TouchableOpacity>
+        )}
 
         <View style={{ gap: spacing.xs }}>
           {tabScreens.map((tab) => {
@@ -444,6 +477,8 @@ function AuthenticatedRoot() {
       <Stack.Screen name="EmployeeSales" component={EmployeeSalesScreen} />
       {/* Every role: account overview + own password (admin/manager) */}
       <Stack.Screen name="Profile" component={ProfileScreen} />
+      {/* Admin + manager: Bar / Lounge setup (screen re-checks the role) */}
+      <Stack.Screen name="BarSetup" component={BarSetupScreen} />
       <Stack.Screen name="Alerts" component={AlertsScreen} />
       {/* Super-admin only: gating is enforced at the screen entry point */}
       <Stack.Screen
@@ -468,6 +503,7 @@ function AppNavigator() {
   useEffect(() => {
     if (auth.isAuthenticated) {
       prefetchSettings();
+      refreshUserModeContext();
       prefetchCustomers();
     }
   }, [auth.isAuthenticated]);
@@ -485,6 +521,7 @@ function AppNavigator() {
         if (online) {
           runPendingSync();
           prefetchSettings();
+          refreshUserModeContext();
           prefetchCustomers();
         }
       });

@@ -23,6 +23,20 @@ export interface StoreSettings {
   allow_cashier_refund?: boolean;
   allow_cashier_discount?: boolean;
   max_discount_percent?: number | null;
+  // Business mode (Bar/Lounge Phase 1) — the store's mode and whether it is
+  // locked (the store has recorded sales).
+  business_mode?: 'retail' | 'bar';
+  business_mode_locked?: boolean;
+  // Bar / Lounge settings
+  bar_business_day_cutoff_hour?: number;
+  bar_timezone?: string;
+  bar_attendant_discount?: boolean;
+  bar_allow_backdated_remittance?: boolean;
+  bar_require_payment_declaration?: boolean;
+  // Commission (D27: rate × attendant's total sales)
+  commission_enabled?: boolean;
+  commission_rate?: number | null;
+  commission_basis?: string;
 }
 
 const numOrNull = (v: unknown): number | null => {
@@ -47,6 +61,17 @@ export function normalizeStoreSettings(data: any): StoreSettings {
     allow_cashier_refund: data?.allow_cashier_refund ?? false,
     allow_cashier_discount: data?.allow_cashier_discount ?? true,
     max_discount_percent: numOrNull(data?.max_discount_percent),
+    // Unknown / missing mode is treated as retail — the safe default for existing stores.
+    business_mode: data?.business_mode === 'bar' ? 'bar' : 'retail',
+    business_mode_locked: data?.business_mode_locked ?? false,
+    bar_business_day_cutoff_hour: numOrNull(data?.bar_business_day_cutoff_hour) ?? 6,
+    bar_timezone: data?.bar_timezone ?? 'Africa/Lagos',
+    bar_attendant_discount: data?.bar_attendant_discount ?? false,
+    bar_allow_backdated_remittance: data?.bar_allow_backdated_remittance ?? false,
+    bar_require_payment_declaration: data?.bar_require_payment_declaration ?? false,
+    commission_enabled: data?.commission_enabled ?? false,
+    commission_rate: numOrNull(data?.commission_rate),
+    commission_basis: data?.commission_basis ?? 'total_sales',
   };
 }
 

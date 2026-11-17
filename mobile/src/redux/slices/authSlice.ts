@@ -10,6 +10,9 @@ interface User {
   branch_id: string | null;
   branch_name: string | null;
   is_super_admin?: boolean;
+  // Bar/Lounge (Phase 1): cashier duty in a bar store, and the store mode at login.
+  operational_profile?: 'bar_controller' | 'bar_attendant' | null;
+  business_mode?: 'retail' | 'bar';
 }
 
 interface AuthState {
@@ -78,6 +81,10 @@ const authSlice = createSlice({
       state.refresh_token = null;
       state.loading = false;
     },
+    // Merge fresh server-side user fields (e.g. /auth/me after a profile change).
+    updateUser: (state, action: PayloadAction<Partial<User>>) => {
+      if (state.user) state.user = { ...state.user, ...action.payload };
+    },
     refreshToken: (
       state,
       action: PayloadAction<{ access_token: string; refresh_token: string }>
@@ -88,6 +95,6 @@ const authSlice = createSlice({
   }
 });
 
-export const { setLoading, setError, loginSuccess, enableBiometric, disableBiometric, logout, refreshToken } =
+export const { setLoading, setError, loginSuccess, enableBiometric, disableBiometric, logout, refreshToken, updateUser } =
   authSlice.actions;
 export default authSlice.reducer;

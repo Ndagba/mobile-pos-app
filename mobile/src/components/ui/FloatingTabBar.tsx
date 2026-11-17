@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, R } from '../../theme';
+import { useBusinessMode } from '../../hooks/useBusinessMode';
 import { useSelector } from 'react-redux';
 import { RootState } from '../../redux/store';
 
@@ -24,6 +25,8 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
   const settings = useSelector((state: RootState) => state.settings.settings);
   const auth = useSelector((state: RootState) => state.auth);
   const role = auth.user?.role ?? 'cashier';
+  // Bar/Lounge: Attendants send orders to the Bar Controller instead of selling directly.
+  const { canRetailCheckout } = useBusinessMode();
 
   const handleNewSale = () => {
     const parent = navigation.getParent();
@@ -110,6 +113,7 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
 
         {/* Center FAB slot */}
         <View style={styles.fabSlot}>
+          {canRetailCheckout && (<>
           <TouchableOpacity
             onPress={handleNewSale}
             activeOpacity={0.85}
@@ -128,6 +132,7 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
             />
           </TouchableOpacity>
           <Text style={styles.fabLabel}>NEW SALE</Text>
+          </>)}
         </View>
 
         {/* Right 3 tabs */}

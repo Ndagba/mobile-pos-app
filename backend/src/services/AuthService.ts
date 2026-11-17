@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/errorHandler';
 import { logger } from '../utils/logger';
+import { normalizeBusinessMode } from '../utils/businessMode';
 
 
 interface BiometricVerifyPayload {
@@ -22,6 +23,7 @@ interface LoginResponse {
     store_id: string;
     branch_id: string | null;
     is_super_admin: boolean;
+    operational_profile?: string | null;
   };
 }
 
@@ -32,7 +34,8 @@ export class AuthService {
     role: string,
     storeId?: string | null,
     branchId?: string | null,
-    isSuperAdmin: boolean = false
+    isSuperAdmin: boolean = false,
+    operationalProfile: string | null = null
   ) {
     const accessToken = jwt.sign(
       {
@@ -41,7 +44,10 @@ export class AuthService {
         role,
         storeId: storeId ?? null,
         branchId: branchId ?? null,
-        is_super_admin: !!isSuperAdmin
+        is_super_admin: !!isSuperAdmin,
+        // Bar/Lounge hint for clients. Servers re-read the profile from the DB on
+        // every guarded action, so a stale token can't keep a revoked profile.
+        operational_profile: operationalProfile ?? null
       },
       process.env.JWT_SECRET || 'secret',
       { expiresIn: '24h' }
@@ -73,7 +79,8 @@ export class AuthService {
           role: true,
           store_id: true,
           branch_id: true,
-          is_super_admin: true
+          is_super_admin: true,
+          operational_profile: true
         }
       });
 
@@ -87,7 +94,8 @@ export class AuthService {
         user.role,
         user.store_id,
         user.branch_id,
-        user.is_super_admin
+        user.is_super_admin,
+        user.operational_profile ?? null
       );
 
       // Update last login
@@ -112,7 +120,8 @@ export class AuthService {
           role: user.role,
           store_id: user.store_id,
           branch_id: user.branch_id ?? null,
-          is_super_admin: user.is_super_admin
+          is_super_admin: user.is_super_admin,
+          operational_profile: user.operational_profile ?? null
         }
       };
 
@@ -143,7 +152,8 @@ export class AuthService {
           store_id: true,
           branch_id: true,
           is_active: true,
-          is_super_admin: true
+          is_super_admin: true,
+          operational_profile: true
         }
       });
 
@@ -157,7 +167,8 @@ export class AuthService {
         user.role,
         user.store_id,
         user.branch_id,
-        user.is_super_admin
+        user.is_super_admin,
+        user.operational_profile ?? null
       );
 
       return {
@@ -191,6 +202,7 @@ export class AuthService {
           branch_id: true,
           is_active: true,
           is_super_admin: true,
+          operational_profile: true,
           password_hash: true,
           branch: { select: { name: true } }
         }
@@ -217,7 +229,8 @@ export class AuthService {
         user.role,
         user.store_id,
         user.branch_id,
-        user.is_super_admin
+        user.is_super_admin,
+        user.operational_profile ?? null
       );
 
       await prisma.user.update({
@@ -237,7 +250,11 @@ export class AuthService {
           store_id: user.store_id,
           branch_id: user.branch_id ?? null,
           branch_name: user.branch?.name ?? null,
-          is_super_admin: user.is_super_admin
+          is_super_admin: user.is_super_admin,
+          operational_profile: user.operational_profile ?? null,
+          business_mode: normalizeBusinessMode(
+            (await prisma.store.findUnique({ where: { id: user.store_id }, select: { business_mode: true } }))?.business_mode
+          )
         }
       };
     } catch (error) {
@@ -374,7 +391,8 @@ export class AuthService {
 
     const updated = await prisma.user.update({
       where: { id: userId },
-      data: { role: newRole }
+      // Bar profiles only apply to cashiers; drop a stale one on promotion.
+      data: newRole === 'cashier' ? { role: newRole } : { role: newRole, operational_profile: null }
     });
 
     await AuthService.logAudit(updatedByUserId, 'UPDATE_USER_ROLE', 'user', userId, {

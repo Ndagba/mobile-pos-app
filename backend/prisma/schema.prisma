@@ -47,6 +47,8 @@ model User {
   first_name           String?
   last_name            String?
   role                 String    @default("cashier") // admin, manager, cashier
+  // Bar-mode duty on top of role='cashier': null | bar_controller | bar_attendant (Phase 1)
+  operational_profile  String?
   is_super_admin       Boolean   @default(false) // platform operator — can create new stores
   biometric_token_hash String?   @unique
   device_id            String?
@@ -76,6 +78,7 @@ model User {
   @@index([device_id])
   @@index([store_id])
   @@index([branch_id])
+  @@index([store_id, operational_profile])
 }
 
 model Category {
@@ -369,6 +372,11 @@ model Store {
   currency  String  @default("NGN")
   is_active Boolean @default(true)
 
+  // Business mode (Bar/Lounge planning, Phase 1): retail | bar.
+  // Admin may choose it until the first sale; afterwards super-admin only (audited).
+  business_mode        String    @default("retail")
+  business_mode_set_at DateTime?
+
   // Subscription tracking
   trial_days_used  Int       @default(0) // Track days in trial
   trial_started_at DateTime?
@@ -398,6 +406,16 @@ model StoreSetting {
   allow_cashier_refund         Boolean  @default(false)
   allow_cashier_discount       Boolean  @default(true)
   max_discount_percent         Int?
+  // Bar / Lounge (Phase 1). Damage is always a house loss (D24) → no damage-charge column.
+  bar_business_day_cutoff_hour    Int      @default(6)
+  bar_timezone                    String   @default("Africa/Lagos")
+  bar_attendant_discount          Boolean  @default(false)
+  bar_allow_backdated_remittance  Boolean  @default(false)
+  bar_require_payment_declaration Boolean  @default(false)
+  // Commission (D27: rate × attendant's total sales)
+  commission_enabled              Boolean  @default(false)
+  commission_rate                 Decimal? @db.Decimal(5, 2)
+  commission_basis                String   @default("total_sales")
   created_at                   DateTime @default(now())
   updated_at                   DateTime @updatedAt
 }

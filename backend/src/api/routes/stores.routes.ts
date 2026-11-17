@@ -4,6 +4,7 @@ import bcryptjs from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { catchAsync, AppError } from '../../utils/errorHandler';
+import { BusinessModeService } from '../../services/BusinessModeService';
 
 const router = Router();
 
@@ -51,8 +52,15 @@ router.post(
       admin_username,
       admin_password,
       admin_email,
-      admin_first_name
+      admin_first_name,
+      business_mode
     } = req.body || {};
+
+    // Business mode chosen at store creation (Bar/Lounge Phase 1). Defaults to retail.
+    if (business_mode !== undefined && business_mode !== 'retail' && business_mode !== 'bar') {
+      throw new AppError(400, "business_mode must be 'retail' or 'bar'");
+    }
+    const mode = business_mode === 'bar' ? 'bar' : 'retail';
 
     if (!name || !admin_username || !admin_password || !admin_email) {
       throw new AppError(
@@ -97,7 +105,9 @@ router.post(
           name: String(name).trim(),
           address: address ? String(address).trim() : null,
           phone: phone ? String(phone).trim() : null,
-          currency: String(currency || 'NGN').toUpperCase()
+          currency: String(currency || 'NGN').toUpperCase(),
+          business_mode: mode,
+          business_mode_set_at: new Date()
         }
       });
       const user = await tx.user.create({
@@ -134,7 +144,7 @@ router.post(
 router.patch(
   '/:id',
   catchAsync(async (req: Request, res: Response) => {
-    const { name, address, phone, currency, is_active } = req.body || {};
+    const { name, address, phone, currency, is_active, business_mode } = req.body || {};
     const data: any = {};
     if (name !== undefined) data.name = String(name).trim();
     if (address !== undefined) data.address = address ? String(address).trim() : null;
@@ -142,10 +152,15 @@ router.patch(
     if (currency !== undefined) data.currency = String(currency).toUpperCase();
     if (is_active !== undefined) data.is_active = !!is_active;
 
-    const store = await prisma.store.update({
-      where: { id: req.params.id },
-      data
-    });
+    // Mode changes go through the audited service path (super-admin may change a
+    // locked store — decision D3).
+    if (business_mode !== undefined) {
+      await BusinessModeService.setStoreMode(req.params.id, business_mode, (req as any).user);
+    }
+
+    const store = Object.keys(data).length
+      ? await prisma.store.update({ where: { id: req.params.id }, data })
+      : await prisma.store.findUnique({ where: { id: req.params.id } });
 
     res.json({ status: 'success', data: store });
   })

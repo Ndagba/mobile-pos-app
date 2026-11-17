@@ -12,3 +12,4 @@ export * from './services/sync';
 export * from './services/api';
 export * from './services/network';
 export * from './services/transactions';
+export * from './modes';

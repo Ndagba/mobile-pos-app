@@ -1,0 +1,85 @@
+{
+  "_comment": "Single source of truth for bar-mode permissions (docs/bar-lounge-mode-planning/permissions-matrix.md). Loaded by BOTH shared/src/modes/businessMode.test.ts and backend/tests/unit/businessMode.test.ts so the two copies of the capability map cannot drift.",
+  "personas": {
+    "admin": { "role": "admin" },
+    "super_admin": { "role": "cashier", "is_super_admin": true },
+    "manager": { "role": "manager" },
+    "manager_with_stray_profile": { "role": "manager", "operational_profile": "bar_attendant" },
+    "controller": { "role": "cashier", "operational_profile": "bar_controller" },
+    "attendant": { "role": "cashier", "operational_profile": "bar_attendant" },
+    "unprofiled_cashier": { "role": "cashier", "operational_profile": null },
+    "bogus_profile_cashier": { "role": "cashier", "operational_profile": "head_waiter" },
+    "unknown_role": { "role": "bar_attendant" }
+  },
+  "bar": {
+    "admin": {
+      "retailCheckout": true,
+      "capabilities": [
+        "bar.order.create", "bar.order.cancel_own", "bar.order.queue.view", "bar.order.fulfil", "bar.order.reject",
+        "bar.order.declare_payment", "bar.reversal.request", "bar.reversal.approve", "bar.remittance.record",
+        "bar.remittance.reverse_after_close", "bar.ledger.view_all", "bar.ledger.write_off", "bar.ledger.adjust",
+        "bar.damage.record", "bar.dayclose.submit", "bar.dayclose.acknowledge", "bar.commission.manage",
+        "bar.reports.view", "bar.settings.manage", "bar.profiles.assign"
+      ]
+    },
+    "super_admin": {
+      "retailCheckout": true,
+      "capabilities": [
+        "bar.order.create", "bar.order.cancel_own", "bar.order.queue.view", "bar.order.fulfil", "bar.order.reject",
+        "bar.order.declare_payment", "bar.reversal.request", "bar.reversal.approve", "bar.remittance.record",
+        "bar.remittance.reverse_after_close", "bar.ledger.view_all", "bar.ledger.write_off", "bar.ledger.adjust",
+        "bar.damage.record", "bar.dayclose.submit", "bar.dayclose.acknowledge", "bar.commission.manage",
+        "bar.reports.view", "bar.settings.manage", "bar.profiles.assign"
+      ]
+    },
+    "manager": {
+      "retailCheckout": true,
+      "capabilities": [
+        "bar.order.create", "bar.order.cancel_own", "bar.order.queue.view", "bar.order.fulfil", "bar.order.reject",
+        "bar.order.declare_payment", "bar.reversal.request", "bar.reversal.approve", "bar.remittance.record",
+        "bar.remittance.reverse_after_close", "bar.ledger.view_all", "bar.ledger.write_off",
+        "bar.damage.record", "bar.dayclose.submit", "bar.dayclose.acknowledge", "bar.commission.manage",
+        "bar.reports.view", "bar.settings.manage"
+      ]
+    },
+    "manager_with_stray_profile": {
+      "retailCheckout": true,
+      "capabilities": [
+        "bar.order.create", "bar.order.cancel_own", "bar.order.queue.view", "bar.order.fulfil", "bar.order.reject",
+        "bar.order.declare_payment", "bar.reversal.request", "bar.reversal.approve", "bar.remittance.record",
+        "bar.remittance.reverse_after_close", "bar.ledger.view_all", "bar.ledger.write_off",
+        "bar.damage.record", "bar.dayclose.submit", "bar.dayclose.acknowledge", "bar.commission.manage",
+        "bar.reports.view", "bar.settings.manage"
+      ]
+    },
+    "controller": {
+      "retailCheckout": true,
+      "capabilities": [
+        "bar.order.cancel_own", "bar.order.queue.view", "bar.order.fulfil", "bar.order.reject",
+        "bar.order.declare_payment", "bar.reversal.request", "bar.remittance.record", "bar.ledger.view_all",
+        "bar.damage.record", "bar.dayclose.submit"
+      ]
+    },
+    "attendant": {
+      "retailCheckout": false,
+      "capabilities": [
+        "bar.order.create", "bar.order.cancel_own", "bar.order.declare_payment", "bar.reversal.request",
+        "bar.ledger.view_own"
+      ]
+    },
+    "unprofiled_cashier": { "retailCheckout": false, "capabilities": [] },
+    "bogus_profile_cashier": { "retailCheckout": false, "capabilities": [] },
+    "unknown_role": { "retailCheckout": false, "capabilities": [] }
+  },
+  "retail": {
+    "admin": { "retailCheckout": true, "capabilities": [] },
+    "super_admin": { "retailCheckout": true, "capabilities": [] },
+    "manager": { "retailCheckout": true, "capabilities": [] },
+    "manager_with_stray_profile": { "retailCheckout": true, "capabilities": [] },
+    "controller": { "retailCheckout": true, "capabilities": [] },
+    "attendant": { "retailCheckout": true, "capabilities": [] },
+    "unprofiled_cashier": { "retailCheckout": true, "capabilities": [] },
+    "bogus_profile_cashier": { "retailCheckout": true, "capabilities": [] },
+    "unknown_role": { "retailCheckout": true, "capabilities": [] }
+  }
+}

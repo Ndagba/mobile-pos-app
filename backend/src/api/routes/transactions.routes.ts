@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { TransactionService } from '../../services/TransactionService';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { requireActiveSubscription } from '../middleware/featureGate.middleware';
+import { blockRetailCheckoutForBarAttendants } from '../middleware/businessMode.middleware';
 import { catchAsync, AppError } from '../../utils/errorHandler';
 import { prisma } from '../../lib/prisma';
 import {
@@ -38,6 +39,7 @@ router.use(authMiddleware);
 router.post(
   '/',
   requireActiveSubscription,
+  blockRetailCheckoutForBarAttendants,
   catchAsync(async (req: Request, res: Response) => {
     const { items, ...transactionData } = req.body;
 
@@ -66,6 +68,7 @@ router.post(
 router.post(
   '/batch',
   requireActiveSubscription,
+  blockRetailCheckoutForBarAttendants,
   catchAsync(async (req: Request, res: Response) => {
     const { transactions } = req.body;
 

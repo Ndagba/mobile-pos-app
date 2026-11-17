@@ -4,6 +4,7 @@ import { AuthService } from '../../services/AuthService';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { catchAsync, AppError } from '../../utils/errorHandler';
 import { prisma } from '../../lib/prisma';
+import { BusinessModeService } from '../../services/BusinessModeService';
 
 const router = Router();
 
@@ -94,7 +95,8 @@ router.get(
         first_name: true,
         last_name: true,
         email: true,
-        role: true
+        role: true,
+        operational_profile: true
       },
       orderBy: { first_name: 'asc' }
     });
@@ -131,10 +133,13 @@ router.get(
   authMiddleware,
   catchAsync(async (req: Request, res: Response) => {
     const user = (req as any).user;
+    // Token claims + the CURRENT store mode and profile (they may have changed
+    // since the token was issued).
+    const ctx = await BusinessModeService.getUserModeContext(user.userId, user.storeId);
 
     res.json({
       status: 'success',
-      data: user
+      data: { ...user, business_mode: ctx.business_mode, operational_profile: ctx.operational_profile }
     });
   })
 );
@@ -205,6 +210,20 @@ router.patch(
         role: updated.role
       }
     });
+  })
+);
+
+// Assign / clear a cashier's bar profile (admin only; bar stores only) — Bar/Lounge Phase 1
+router.patch(
+  '/users/:id/profile',
+  authMiddleware,
+  catchAsync(async (req: Request, res: Response) => {
+    const actor = (req as any).user;
+    if (!req.body || !('operational_profile' in req.body)) {
+      throw new AppError(400, 'operational_profile is required (use null to clear)');
+    }
+    const result = await BusinessModeService.setUserProfile(req.params.id, req.body.operational_profile, actor);
+    res.json({ status: 'success', data: result });
   })
 );
 

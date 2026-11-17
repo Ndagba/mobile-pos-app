@@ -36,3 +36,33 @@ describe('helpers', () => {
     expect(a).not.toBe(b);
   });
 });
+
+import { reportRangePresets, reportTableToCsv } from './barOrders';
+
+describe('reportTableToCsv (mirrors backend toCsv)', () => {
+  it('same output as the backend test vector', () => {
+    const csv = reportTableToCsv({
+      report: 'remittances', title: 'Money handed over', description: '', from: '2026-11-17', to: '2026-11-17',
+      columns: [{ key: 'a', label: 'Attendant', type: 'text' }, { key: 'n', label: 'Note', type: 'text' }, { key: 'v', label: 'Amount', type: 'money' }],
+      rows: [{ a: 'Okafor, John', n: '=HYPERLINK("x")', v: -500 }],
+      totals: { a: 'Total', n: null, v: -500 },
+    });
+    expect(csv.trim().split('\r\n').slice(1)).toEqual([
+      'Attendant,Note,Amount',
+      `"Okafor, John","'=HYPERLINK(""x"")","-500"`,
+      `Total,,"-500"`,
+    ]);
+  });
+});
+
+describe('reportRangePresets', () => {
+  it('builds business-date ranges', () => {
+    const p = Object.fromEntries(reportRangePresets('2026-11-17').map((x) => [x.key, [x.from, x.to]]));
+    expect(p).toEqual({
+      today: ['2026-11-17', '2026-11-17'],
+      yesterday: ['2026-11-16', '2026-11-16'],
+      '7d': ['2026-11-11', '2026-11-17'],
+      month: ['2026-11-01', '2026-11-17'],
+    });
+  });
+});

@@ -9,6 +9,14 @@ import { hasBarCapability } from '../../utils/businessMode';
 import { BarLedgerService, storeBusinessDay } from '../../services/BarLedgerService';
 import { BarDamageService } from '../../services/BarDamageService';
 import { BarDayCloseService } from '../../services/BarDayCloseService';
+import { BarCommissionService } from '../../services/BarCommissionService';
+import {
+  BAR_REPORTS,
+  BarReportKey,
+  BarReportService,
+  CONTROLLER_MAX_DAYS_BACK,
+  CONTROLLER_REPORTS,
+} from '../../services/BarReportService';
 
 /**
  * Bar / Lounge API (planning Phase 2) — mounted at /v1/bar.
@@ -478,6 +486,121 @@ router.post(
   catchAsync(async (req: Request, res: Response) => {
     const branchIds = await getAuthorizedBranchIds(req);
     res.json({ status: 'success', data: await BarDayCloseService.reopen(actorOf(req), req.params.id, branchIds, req.body?.reason) });
+  })
+);
+
+// ── Commission (Phase 5) — manager / admin ───────────────────
+
+router.get(
+  '/commission',
+  requireBarCapability('bar.commission.manage'),
+  catchAsync(async (req: Request, res: Response) => {
+    res.json({ status: 'success', data: await BarCommissionService.list(actorOf(req), { status: statusFilter(req.query.status) }) });
+  })
+);
+
+router.post(
+  '/commission',
+  requireActiveSubscription,
+  requireBarCapability('bar.commission.manage'),
+  catchAsync(async (req: Request, res: Response) => {
+    const branchIds = await getAuthorizedBranchIds(req);
+    const r = await BarCommissionService.createDraft(actorOf(req), branchIds, req.body ?? {});
+    res.status(201).json({ status: 'success', data: { ...r.run, skipped_already_posted: r.skipped_already_posted } });
+  })
+);
+
+router.post(
+  '/commission/lines/:lineId/pay',
+  requireActiveSubscription,
+  requireBarCapability('bar.commission.manage'),
+  catchAsync(async (req: Request, res: Response) => {
+    res.json({ status: 'success', data: await BarCommissionService.markPaid(actorOf(req), req.params.lineId, req.body ?? {}) });
+  })
+);
+
+router.get(
+  '/commission/:id',
+  requireBarCapability('bar.commission.manage'),
+  catchAsync(async (req: Request, res: Response) => {
+    res.json({ status: 'success', data: await BarCommissionService.get(actorOf(req), req.params.id) });
+  })
+);
+
+router.post(
+  '/commission/:id/post',
+  requireActiveSubscription,
+  requireBarCapability('bar.commission.manage'),
+  catchAsync(async (req: Request, res: Response) => {
+    res.json({ status: 'success', data: await BarCommissionService.post(actorOf(req), req.params.id) });
+  })
+);
+
+router.post(
+  '/commission/:id/cancel',
+  requireActiveSubscription,
+  requireBarCapability('bar.commission.manage'),
+  catchAsync(async (req: Request, res: Response) => {
+    res.json({ status: 'success', data: await BarCommissionService.cancel(actorOf(req), req.params.id, req.body?.reason) });
+  })
+);
+
+// Attendant: own posted commission (calculated / paid).
+router.get(
+  '/me/commission',
+  requireBarCapability('bar.ledger.view_own'),
+  catchAsync(async (req: Request, res: Response) => {
+    res.json({ status: 'success', data: await BarCommissionService.mine(actorOf(req)) });
+  })
+);
+
+// ── Reports (Phase 5) ────────────────────────────────────────
+// Managers/admins: all ten. Bar Controllers: the daily-operations subset, last 7 days.
+
+const isControllerOnly = (req: Request) => {
+  const ctx = (req as any).modeContext;
+  const u = (req as any).user;
+  return !hasBarCapability(
+    { role: ctx?.role ?? u.role, is_super_admin: u.is_super_admin, operational_profile: ctx?.operational_profile },
+    'bar',
+    'bar.reports.view'
+  );
+};
+
+router.get(
+  '/reports',
+  requireBarCapability('bar.ledger.view_all'),
+  catchAsync(async (req: Request, res: Response) => {
+    const controller = isControllerOnly(req);
+    const keys = (Object.keys(BAR_REPORTS) as BarReportKey[]).filter((k) => !controller || CONTROLLER_REPORTS.includes(k));
+    res.json({
+      status: 'success',
+      data: {
+        max_days_back: controller ? CONTROLLER_MAX_DAYS_BACK : null,
+        reports: keys.map((k) => ({ key: k, ...BAR_REPORTS[k] })),
+      },
+    });
+  })
+);
+
+router.get(
+  '/reports/:key',
+  requireBarCapability('bar.ledger.view_all'),
+  catchAsync(async (req: Request, res: Response) => {
+    const branchIds = await getAuthorizedBranchIds(req);
+    const table = await BarReportService.run(
+      req.params.key as BarReportKey,
+      actorOf(req).storeId,
+      branchIds,
+      { from: req.query.from, to: req.query.to },
+      { controller: isControllerOnly(req) }
+    );
+    if (req.query.format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="jaypos-bar-${table.report}-${table.from}-to-${table.to}.csv"`);
+      return res.send('﻿' + BarReportService.toCsv(table)); // BOM so Excel reads ₦ correctly
+    }
+    res.json({ status: 'success', data: table });
   })
 );
 

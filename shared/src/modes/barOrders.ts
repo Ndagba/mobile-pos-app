@@ -339,3 +339,110 @@ export function dayCloseSummaryText(c: Pick<DayClose, 'business_date' | 'closed_
   ];
   return lines.join('\n');
 }
+
+// ─── Commission + reports (Phase 5) ───────────────────────────
+
+export interface CommissionLine {
+  id: string;
+  cashier: BarOrderPerson;
+  branch_id: string;
+  gross_sales: number;
+  reversals: number;
+  eligible_sales: number;
+  commission_amount: number;
+  status: 'draft' | 'posted' | 'cancelled';
+  expense_id: string | null;
+  payment_status: 'unpaid' | 'paid';
+  paid_at: string | null;
+  paid_method: string | null;
+  paid_reference: string | null;
+}
+
+export interface CommissionRun {
+  id: string;
+  status: 'draft' | 'posted' | 'cancelled';
+  period_start: string;
+  period_end: string;
+  branch_id: string | null;
+  rate: number;
+  basis: string;
+  posted_at: string | null;
+  cancelled_reason: string | null;
+  totals: { eligible_sales: number; commission: number; paid: number };
+  lines: CommissionLine[];
+  skipped_already_posted?: string[];
+}
+
+export interface MyCommissionLine {
+  id: string;
+  period_start: string;
+  period_end: string;
+  rate: number;
+  eligible_sales: number;
+  commission_amount: number;
+  payment_status: 'unpaid' | 'paid';
+  paid_at: string | null;
+}
+
+export const COMMISSION_STATUS_LABELS: Record<CommissionRun['status'], string> = {
+  draft: 'Draft (not posted)',
+  posted: 'Posted to expenses',
+  cancelled: 'Cancelled',
+};
+
+export type ReportColumnType = 'text' | 'money' | 'number' | 'date' | 'percent';
+
+export interface ReportTable {
+  report: string;
+  title: string;
+  description: string;
+  from: string;
+  to: string;
+  columns: { key: string; label: string; type: ReportColumnType }[];
+  rows: Record<string, string | number | null>[];
+  totals: Record<string, string | number | null> | null;
+}
+
+export interface ReportCatalog {
+  max_days_back: number | null;
+  reports: { key: string; title: string; description: string }[];
+}
+
+/**
+ * CSV (RFC 4180) for a report table — mirrors the backend's BarReportService.toCsv
+ * so a report shared from the app opens the same in Excel / Sheets. Values that
+ * look like spreadsheet formulas are neutralised.
+ */
+export function reportTableToCsv(t: ReportTable): string {
+  const esc = (v: unknown) => {
+    if (v === null || v === undefined) return '';
+    const s = String(v);
+    const formula = /^[=+\-@]/.test(s);
+    return /[",\r\n]/.test(s) || formula
+      ? `"${(formula && Number.isNaN(Number(s)) ? `'${s}` : s).replace(/"/g, '""')}"`
+      : s;
+  };
+  const lines = [
+    `${esc(t.title)},${esc(`${t.from} to ${t.to}`)}`,
+    t.columns.map((c) => esc(c.label)).join(','),
+    ...t.rows.map((r) => t.columns.map((c) => esc(r[c.key])).join(',')),
+  ];
+  if (t.totals) lines.push(t.columns.map((c) => esc(t.totals![c.key])).join(','));
+  return lines.join('\r\n') + '\r\n';
+}
+
+/** Common business-date ranges for report pickers. */
+export function reportRangePresets(today: string): { key: string; label: string; from: string; to: string }[] {
+  const shift = (d: string, n: number) => {
+    const x = new Date(`${d}T00:00:00.000Z`);
+    x.setUTCDate(x.getUTCDate() + n);
+    return x.toISOString().slice(0, 10);
+  };
+  const monthStart = `${today.slice(0, 8)}01`;
+  return [
+    { key: 'today', label: 'Today', from: today, to: today },
+    { key: 'yesterday', label: 'Yesterday', from: shift(today, -1), to: shift(today, -1) },
+    { key: '7d', label: 'Last 7 days', from: shift(today, -6), to: today },
+    { key: 'month', label: 'This month', from: monthStart, to: today },
+  ];
+}

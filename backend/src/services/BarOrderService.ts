@@ -6,6 +6,7 @@ import { logger } from '../utils/logger';
 import { TransactionService } from './TransactionService';
 import { businessDateToDbDate, getBusinessDate } from '../utils/businessDate';
 import { appendLedgerEntry } from './BarLedgerService';
+import { assertDayOpen, findClosedDay } from './barDayGuard';
 
 /**
  * Bar / Lounge orders (planning Phase 2).
@@ -523,6 +524,8 @@ export class BarOrderService {
     const businessDateDb = businessDateToDbDate(businessDate);
     const now = new Date();
     const method = order.customer_payment_method ?? 'cash';
+    // Phase 4: a controller who has closed today can't keep releasing into it.
+    await assertDayOpen(actor.userId, businessDateDb, { self: true, what: 'release more orders' });
 
     await prisma.$transaction(async (tx) => {
       await BarOrderService.fulfilInTx(tx, actor, order, {
@@ -654,6 +657,12 @@ export class BarOrderService {
     const order = await this.getOrder(actor, id, opts);
     if (!['submitted', 'accepted', 'fulfilled'].includes(order.status)) {
       throw new AppError(409, `This order is ${order.status}`);
+    }
+    // Phase 4: once the releasing controller has closed that day, only a manager may change it.
+    if (order.status === 'fulfilled' && order.fulfilled_by_user_id && order.business_date && !isSupervisor(actor)) {
+      if (await findClosedDay(order.fulfilled_by_user_id, order.business_date)) {
+        throw new AppError(403, 'That day has been closed — ask a manager to change the payment', true, { code: 'DAY_CLOSED' });
+      }
     }
     const method = body.method;
     const total = Number(order.fulfilled_total ?? order.total_amount);

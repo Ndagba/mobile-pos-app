@@ -886,6 +886,8 @@ model BarOrder {
   reversal_requested_by_user_id String?
   reversal_requested_at         DateTime?
   reversal_request_reason       String?
+  // Phase 4: the releasing Bar Controller's day close that covers this order
+  day_close_id                  String?
   created_at              DateTime  @default(now())
   updated_at              DateTime  @updatedAt
 
@@ -900,6 +902,7 @@ model BarOrder {
   @@index([store_id, branch_id, status])
   @@index([initiated_by_user_id, status])
   @@index([business_date])
+  @@index([day_close_id])
 }
 
 model BarOrderItem {
@@ -961,9 +964,77 @@ model CashierRemittance {
   reversed_by_user_id String?
   reversed_at         DateTime?
   reversal_reason     String?
+  day_close_id        String? // Phase 4: the receiving Bar Controller's day close
   created_at          DateTime  @default(now())
 
   @@index([store_id, cashier_user_id, business_date])
   @@index([store_id, business_date])
   @@index([store_id, method, reference])
+  @@index([day_close_id])
+}
+
+// ─── Bar / Lounge (Phase 4): damages + day close ──────────────
+
+// Flat / damaged stock. Always a HOUSE LOSS (decision D24): it never touches the
+// Attendant ledger and is never a sale. Stock leaves via a 'damage' InventoryMovement.
+model DamageRecord {
+  id                  String    @id @default(uuid())
+  store_id            String
+  branch_id           String
+  product_id          String
+  quantity            Decimal   @db.Decimal(15, 4)
+  reason_code         String // flat | broken | bad_cap | expired | other
+  notes               String?
+  responsible_user_id String? // Attendant involved (analytics only), or null = house
+  recorded_by_user_id String
+  unit_cost           Decimal?  @db.Decimal(12, 2) // snapshot of cost_price → loss value
+  unit_price          Decimal   @db.Decimal(12, 2) // snapshot of selling price → lost sales value
+  business_date       DateTime  @db.Date
+  client_ref          String    @unique
+  status              String    @default("recorded") // recorded | reversed
+  reversed_by_user_id String?
+  reversed_at         DateTime?
+  reversal_reason     String?
+  day_close_id        String?
+  created_at          DateTime  @default(now())
+
+  @@index([store_id, business_date])
+  @@index([responsible_user_id])
+  @@index([product_id])
+  @@index([day_close_id])
+}
+
+// One close per Bar Controller per business day (decision D11). The snapshot is
+// frozen at submission; reopening (manager) unlocks the day, resubmitting replaces it.
+model BarDayClose {
+  id                      String    @id @default(uuid())
+  store_id                String
+  branch_id               String
+  business_date           DateTime  @db.Date
+  closed_by_user_id       String // the Bar Controller
+  status                  String    @default("submitted") // submitted | acknowledged | reopened
+  snapshot                Json // frozen figures at submission
+  expected_cash           Decimal   @db.Decimal(15, 2)
+  expected_transfer       Decimal   @db.Decimal(15, 2)
+  expected_card           Decimal   @db.Decimal(15, 2)
+  expected_other          Decimal   @db.Decimal(15, 2)
+  counted_cash            Decimal   @db.Decimal(15, 2)
+  variance                Decimal   @db.Decimal(15, 2) // counted − expected cash
+  variance_reason         String?
+  notes                   String?
+  submitted_at            DateTime  @default(now())
+  acknowledged_by_user_id String?
+  acknowledged_amount     Decimal?  @db.Decimal(15, 2) // cash the manager actually received
+  acknowledged_at         DateTime?
+  ack_note                String?
+  variance_treatment      String? // absorb | charge_controller (D23, shortage only)
+  reopened_by_user_id     String?
+  reopened_at             DateTime?
+  reopen_reason           String?
+  created_at              DateTime  @default(now())
+  updated_at              DateTime  @updatedAt
+
+  @@unique([branch_id, business_date, closed_by_user_id])
+  @@index([store_id, business_date])
+  @@index([status])
 }

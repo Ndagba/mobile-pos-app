@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/errorHandler';
 import { businessDateToDbDate, getBusinessDate } from '../utils/businessDate';
+import { assertDayOpen } from './barDayGuard';
 
 /**
  * Attendant ledger + remittances (Bar/Lounge planning Phase 3).
@@ -529,6 +530,8 @@ export class BarLedgerService {
     const branchId = cashier.branch_id ?? (await prisma.user.findUnique({ where: { id: actor.userId }, select: { branch_id: true } }))?.branch_id;
     if (!branchId) throw new AppError(400, 'This Attendant has no branch');
     const dateDb = businessDateToDbDate(date);
+    // Phase 4: never into a day the receiving controller has closed (reopen first).
+    await assertDayOpen(actor.userId, dateDb, { self: true, what: 'record money for that day' });
 
     const created = await prisma.$transaction(async (tx) => {
       const rem = await tx.cashierRemittance.create({
@@ -594,6 +597,11 @@ export class BarLedgerService {
       if (rem.received_by_user_id !== actor.userId) throw new AppError(403, 'You can only reverse remittances you recorded');
       if (remDate !== day.today) throw new AppError(403, "Only a manager can reverse a remittance from a past day");
     }
+    // Phase 4: a hand-over inside a closed day can't be reversed until that day is reopened.
+    await assertDayOpen(rem.received_by_user_id, rem.business_date, {
+      self: rem.received_by_user_id === actor.userId,
+      what: 'reverse this hand-over',
+    });
 
     await prisma.$transaction(async (tx) => {
       const r = await tx.cashierRemittance.updateMany({

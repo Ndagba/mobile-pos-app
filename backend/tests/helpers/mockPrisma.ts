@@ -73,6 +73,8 @@ export interface MockPrisma {
   barOrderItem: MockModel;
   cashierLedgerEntry: MockModel;
   cashierRemittance: MockModel;
+  damageRecord: MockModel;
+  barDayClose: MockModel;
   $transaction: jest.Mock;
   $queryRaw: jest.Mock;
   $executeRaw: jest.Mock;
@@ -109,6 +111,8 @@ export function createMockPrisma(): MockPrisma {
     barOrderItem: mockModel(),
     cashierLedgerEntry: mockModel(),
     cashierRemittance: mockModel(),
+    damageRecord: mockModel(),
+    barDayClose: mockModel(),
     $queryRaw: jest.fn(),
     $executeRaw: jest.fn(),
     $transaction: jest.fn(),

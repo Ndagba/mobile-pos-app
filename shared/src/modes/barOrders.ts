@@ -220,3 +220,122 @@ export function describeBalance(amount: number): 'owes' | 'settled' | 'credit' {
   if (amount < -0.009) return 'credit';
   return 'settled';
 }
+
+// ─── Damages + day close (Phase 4) ────────────────────────────
+
+export type DamageReason = 'flat' | 'broken' | 'bad_cap' | 'expired' | 'other';
+
+export const DAMAGE_REASON_LABELS: Record<DamageReason, string> = {
+  flat: 'Flat',
+  broken: 'Broken bottle',
+  bad_cap: 'Bad cap',
+  expired: 'Expired',
+  other: 'Other',
+};
+
+export interface DamageRecord {
+  id: string;
+  product_id: string;
+  product_name: string | null;
+  quantity: number;
+  reason_code: DamageReason;
+  notes: string | null;
+  /** Attendant involved — information only; damage is always a house loss (D24). */
+  responsible: BarOrderPerson | null;
+  recorded_by: BarOrderPerson;
+  unit_cost: number | null;
+  unit_price: number;
+  cost_value: number;
+  retail_value: number;
+  business_date: string;
+  status: 'recorded' | 'reversed';
+  reversal_reason: string | null;
+  created_at: string;
+  replayed?: boolean;
+}
+
+export interface DamageList {
+  from?: string;
+  to?: string;
+  items: DamageRecord[];
+  totals: { count: number; quantity: number; cost_value: number; retail_value: number };
+  by_product: { product_id: string; product_name: string | null; quantity: number; cost_value: number; retail_value: number }[];
+  by_reason: Partial<Record<DamageReason, number>>;
+  by_responsible: { user_id: string | null; name: string | null; quantity: number; cost_value: number }[];
+}
+
+export type DayCloseStatus = 'submitted' | 'acknowledged' | 'reopened';
+
+export const DAY_CLOSE_STATUS_LABELS: Record<DayCloseStatus, string> = {
+  submitted: 'Waiting for manager',
+  acknowledged: 'Handed over',
+  reopened: 'Reopened',
+};
+
+/** Live (or frozen) figures for one Bar Controller's business day. */
+export interface DayCloseFigures {
+  business_date: string;
+  controller: BarOrderPerson;
+  branch_id: string | null;
+  remittances: {
+    count: number;
+    by_method: Record<RemittanceMethod, number>;
+    total: number;
+    by_attendant: { cashier_id: string; name: string | null; amount: number; count: number }[];
+  };
+  orders_released: { count: number; total: number; reversed_count: number; reduced_count: number };
+  damages: { count: number; quantity: number; cost_value: number; retail_value: number };
+  open_orders: { mine_in_progress: number; unclaimed_in_queue: number };
+  handover_cash_expected: number;
+}
+
+export interface DayClose {
+  id: string;
+  business_date: string;
+  branch_id: string;
+  status: DayCloseStatus;
+  closed_by: BarOrderPerson;
+  expected: Record<RemittanceMethod, number>;
+  counted_cash: number;
+  /** counted − expected cash: negative = short, positive = over. */
+  variance: number;
+  variance_reason: string | null;
+  notes: string | null;
+  submitted_at: string;
+  acknowledged_by: BarOrderPerson | null;
+  acknowledged_amount: number | null;
+  acknowledged_at: string | null;
+  ack_note: string | null;
+  variance_treatment: 'absorb' | 'charge_controller' | null;
+  reopened_by: BarOrderPerson | null;
+  reopened_at: string | null;
+  reopen_reason: string | null;
+  snapshot: DayCloseFigures;
+}
+
+export interface DayClosePreview {
+  today: string;
+  figures: DayCloseFigures;
+  close: DayClose | null;
+}
+
+/** Plain-text day-close summary for sharing / printing (WhatsApp, SMS, print). */
+export function dayCloseSummaryText(c: Pick<DayClose, 'business_date' | 'closed_by' | 'expected' | 'counted_cash' | 'variance' | 'variance_reason' | 'status' | 'snapshot'>, money: (n: number) => string): string {
+  const f = c.snapshot;
+  const lines = [
+    `JayPOS — Bar day close ${c.business_date}`,
+    `Bar Controller: ${c.closed_by.name ?? '—'}`,
+    ``,
+    `Orders released: ${f.orders_released.count} (${money(f.orders_released.total)})`,
+    `Money received from Attendants: ${money(f.remittances.total)}`,
+    `  Cash ${money(c.expected.cash)} · Transfer ${money(c.expected.transfer)} · POS ${money(c.expected.card)}${c.expected.other ? ` · Other ${money(c.expected.other)}` : ''}`,
+    ...f.remittances.by_attendant.map((a) => `  - ${a.name ?? 'Attendant'}: ${money(a.amount)} (${a.count})`),
+    `Damaged / flat: ${f.damages.quantity} item(s), ${money(f.damages.cost_value)} at cost`,
+    ``,
+    `Cash expected: ${money(c.expected.cash)}`,
+    `Cash counted:  ${money(c.counted_cash)}`,
+    `Variance: ${c.variance === 0 ? 'none' : `${money(Math.abs(c.variance))} ${c.variance < 0 ? 'short' : 'over'}`}${c.variance_reason ? ` — ${c.variance_reason}` : ''}`,
+    `Status: ${DAY_CLOSE_STATUS_LABELS[c.status]}`,
+  ];
+  return lines.join('\n');
+}

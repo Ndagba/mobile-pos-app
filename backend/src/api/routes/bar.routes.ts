@@ -6,7 +6,9 @@ import { catchAsync, AppError } from '../../utils/errorHandler';
 import { getAuthorizedBranchId, getAuthorizedBranchIds } from '../../utils/branchHelper';
 import { BarOrderService, serializeOrder } from '../../services/BarOrderService';
 import { hasBarCapability } from '../../utils/businessMode';
-import { BarLedgerService } from '../../services/BarLedgerService';
+import { BarLedgerService, storeBusinessDay } from '../../services/BarLedgerService';
+import { BarDamageService } from '../../services/BarDamageService';
+import { BarDayCloseService } from '../../services/BarDayCloseService';
 
 /**
  * Bar / Lounge API (planning Phase 2) — mounted at /v1/bar.
@@ -355,6 +357,127 @@ router.post(
   requireBarCapability('bar.remittance.record'),
   catchAsync(async (req: Request, res: Response) => {
     res.json({ status: 'success', data: await BarLedgerService.reverseRemittance(actorOf(req), req.params.id, req.body?.reason) });
+  })
+);
+
+// ── Damages (Phase 4) — house loss, never charged to the Attendant (D24) ──
+
+router.post(
+  '/damages',
+  requireActiveSubscription,
+  requireBarCapability('bar.damage.record'),
+  catchAsync(async (req: Request, res: Response) => {
+    const branchId = await getAuthorizedBranchId(req);
+    if (!branchId) throw new AppError(400, 'branch_id is required');
+    const r = await BarDamageService.record(actorOf(req), branchId, req.body ?? {});
+    res.status(r.replayed ? 200 : 201).json({ status: 'success', data: { ...r.record, replayed: r.replayed } });
+  })
+);
+
+// List + totals. Controllers: today only (D14). Managers/admins: any range.
+router.get(
+  '/damages',
+  requireBarCapability('bar.damage.record'),
+  catchAsync(async (req: Request, res: Response) => {
+    const a = actorOf(req);
+    const branchIds = await getAuthorizedBranchIds(req);
+    const supervisor = a.role === 'admin' || a.role === 'manager' || a.is_super_admin;
+    const today = (await storeBusinessDay(a.storeId)).today;
+    const asDate = (v: unknown) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined);
+    const from = supervisor ? asDate(req.query.from) ?? asDate(req.query.date) ?? today : today;
+    const to = supervisor ? asDate(req.query.to) ?? asDate(req.query.date) ?? today : today;
+    const data = await BarDamageService.list(a.storeId, {
+      branchIds,
+      from,
+      to,
+      productId: typeof req.query.product_id === 'string' ? req.query.product_id : undefined,
+      responsibleId: typeof req.query.responsible_user_id === 'string' ? req.query.responsible_user_id : undefined,
+      includeReversed: req.query.include_reversed === 'true',
+    });
+    res.json({ status: 'success', data: { from, to, ...data } });
+  })
+);
+
+router.post(
+  '/damages/:id/reverse',
+  requireActiveSubscription,
+  requireBarCapability('bar.damage.record'),
+  catchAsync(async (req: Request, res: Response) => {
+    res.json({ status: 'success', data: await BarDamageService.reverse(actorOf(req), req.params.id, req.body?.reason) });
+  })
+);
+
+// Attendant: damages that name them (information only — never charged).
+router.get(
+  '/me/damages',
+  requireBarCapability('bar.ledger.view_own'),
+  catchAsync(async (req: Request, res: Response) => {
+    const a = actorOf(req);
+    const data = await BarDamageService.list(a.storeId, { responsibleId: a.userId });
+    res.json({ status: 'success', data });
+  })
+);
+
+// ── Day close + handover (Phase 4) ───────────────────────────
+
+router.get(
+  '/day-close/preview',
+  requireBarCapability('bar.dayclose.submit'),
+  catchAsync(async (req: Request, res: Response) => {
+    res.json({ status: 'success', data: await BarDayCloseService.preview(actorOf(req), req.query.date) });
+  })
+);
+
+router.post(
+  '/day-close',
+  requireActiveSubscription,
+  requireBarCapability('bar.dayclose.submit'),
+  catchAsync(async (req: Request, res: Response) => {
+    res.status(201).json({ status: 'success', data: await BarDayCloseService.submit(actorOf(req), req.body ?? {}) });
+  })
+);
+
+// Managers: handover inbox for their branches. Controllers: their own closes.
+router.get(
+  '/day-close',
+  requireBarCapability('bar.dayclose.submit'),
+  catchAsync(async (req: Request, res: Response) => {
+    const branchIds = await getAuthorizedBranchIds(req);
+    const data = await BarDayCloseService.list(actorOf(req), branchIds, {
+      status: statusFilter(req.query.status),
+      date: req.query.date,
+      mine: req.query.mine === 'true',
+    });
+    res.json({ status: 'success', data });
+  })
+);
+
+router.get(
+  '/day-close/:id',
+  requireBarCapability('bar.dayclose.submit'),
+  catchAsync(async (req: Request, res: Response) => {
+    const branchIds = await getAuthorizedBranchIds(req);
+    res.json({ status: 'success', data: await BarDayCloseService.get(actorOf(req), req.params.id, branchIds) });
+  })
+);
+
+router.post(
+  '/day-close/:id/acknowledge',
+  requireActiveSubscription,
+  requireBarCapability('bar.dayclose.acknowledge'),
+  catchAsync(async (req: Request, res: Response) => {
+    const branchIds = await getAuthorizedBranchIds(req);
+    res.json({ status: 'success', data: await BarDayCloseService.acknowledge(actorOf(req), req.params.id, branchIds, req.body ?? {}) });
+  })
+);
+
+router.post(
+  '/day-close/:id/reopen',
+  requireActiveSubscription,
+  requireBarCapability('bar.dayclose.acknowledge'),
+  catchAsync(async (req: Request, res: Response) => {
+    const branchIds = await getAuthorizedBranchIds(req);
+    res.json({ status: 'success', data: await BarDayCloseService.reopen(actorOf(req), req.params.id, branchIds, req.body?.reason) });
   })
 );
 

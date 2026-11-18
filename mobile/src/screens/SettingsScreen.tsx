@@ -1244,6 +1244,43 @@ export default function SettingsScreen() {
           </>
         )}
 
+        {/* ══════════ REPORTS & TOOLS (admin + manager, phone only) ══════════
+            The phone tab bar has no Admin tab, so these screens need an entry
+            point here. Tablets reach them from the Admin item in the sidebar. */}
+        {canManageStaff && !isTablet && (
+          <>
+            <SectionHeader label="Reports & tools" />
+            {([
+              { route: 'ProfitLoss', icon: 'chart-line', color: C.accent, title: 'Profit & Loss',
+                subtitle: 'Revenue, costs, expenses and net profit by branch' },
+              { route: 'InventoryTurnover', icon: 'rotate-3d-variant', color: C.green, title: 'Inventory Turnover',
+                subtitle: 'Units sold and turnover ratio per product' },
+              { route: 'Batches', icon: 'calendar-clock', color: C.amber, title: 'Batches & Expiry',
+                subtitle: 'Expiring or expired batches, and add new ones' },
+              ...(isAdmin
+                ? [{ route: 'Expenses', icon: 'cash-multiple', color: C.rose, title: 'Expenses',
+                     subtitle: 'Record running costs and review spending' } as const]
+                : []),
+            ] as const).map((item) => (
+              <TouchableOpacity
+                key={item.route}
+                style={[styles.card, styles.navRow, { marginBottom: 14 }]}
+                activeOpacity={0.75}
+                onPress={() => navigation.navigate(item.route)}
+              >
+                <View style={[styles.navIcon, { backgroundColor: item.color + '1A' }]}>
+                  <MaterialCommunityIcons name={item.icon} size={20} color={item.color} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.navTitle}>{item.title}</Text>
+                  <Text style={styles.navSubtitle}>{item.subtitle}</Text>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={20} color={C.muted} />
+              </TouchableOpacity>
+            ))}
+          </>
+        )}
+
         {/* ══════════ AUDIT LOGS (admin only) ══════════ */}
         {isAdmin && (
           <TouchableOpacity

@@ -418,6 +418,20 @@ export default function CustomersScreen() {
           <Text style={styles.eyebrow}>Customers</Text>
           <Text style={styles.title}>Directory</Text>
         </View>
+        {/* Expenses — admin only, same as the Expenses screen itself */}
+        {user?.role === 'admin' && (
+          <TouchableOpacity
+            style={styles.expensesBtn}
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('Expenses')}
+            accessibilityRole="button"
+            accessibilityLabel="Expenses"
+          >
+            <MaterialCommunityIcons name="cash-multiple" size={16} color={C.accent} />
+            <Text style={styles.expensesBtnText}>Expenses</Text>
+            <MaterialCommunityIcons name="chevron-right" size={16} color={C.accent} />
+          </TouchableOpacity>
+        )}
         <TouchableOpacity style={styles.searchButton} activeOpacity={0.7}>
           <MaterialCommunityIcons name="magnify" size={18} color={C.ink} />
         </TouchableOpacity>
@@ -652,6 +666,21 @@ const styles = StyleSheet.create({
   headerLeft: {
     flex: 1,
   },
+  // Mirrors the "Purchase orders" pill on the Suppliers directory.
+  expensesBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+    marginRight: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: C.violetBg,
+    borderWidth: 1,
+    borderColor: C.accent,
+  },
+  expensesBtnText: { fontSize: 13, fontWeight: '700', color: C.accent },
   eyebrow: {
     fontSize: 13,
     fontWeight: '500',

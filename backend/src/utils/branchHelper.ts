@@ -61,6 +61,30 @@ export async function getAuthorizedBranchId(req: Request): Promise<string | null
 }
 
 /**
+ * Asserts that an explicitly supplied branch id (e.g. a camelCase `branchId` query/body value
+ * that the helpers below do not read) is one the caller may access: same store, and within the
+ * caller's role scope (admin = store branches, manager = home + assigned, cashier = home).
+ * Optionally restricts the caller's role first. Throws 403 otherwise.
+ */
+export async function assertBranchAccess(
+  req: Request,
+  branchId: string,
+  allowedRoles?: string[]
+): Promise<void> {
+  const user = (req as any).user;
+  if (!user) {
+    throw new AppError(401, 'Authentication required');
+  }
+  if (allowedRoles && !allowedRoles.includes(user.role)) {
+    throw new AppError(403, 'You do not have permission to access this resource');
+  }
+  const authorized = await getAuthorizedBranchIds(req);
+  if (!authorized.includes(branchId)) {
+    throw new AppError(403, 'You do not have permission to access this branch');
+  }
+}
+
+/**
  * Resolves all branch IDs that the user is authorized to access for a query/operation.
  * Returns an array of branch IDs. Handles "All Branches" gracefully by returning all authorized branches.
  */

@@ -15,8 +15,8 @@ import { C, naira } from '../theme';
 /**
  * Home tab for cashiers in a Bar / Lounge store (Bar/Lounge planning, Phase 1).
  * Replaces the retail Dashboard, whose "New sale" would bypass the Bar Controller.
- * The order queue, attendant dashboard and remittances arrive in Phases 2–3; for
- * now this shows the cashier's bar duty and what it will let them do.
+ * Shows the cashier's bar duty and the shortcuts for it: orders, balance and
+ * remittances, damages, day close and reports (all shipped in Phases 2–5).
  */
 const PROFILE_DUTIES = {
   bar_attendant: [
@@ -51,8 +51,20 @@ export default function BarHomeScreen() {
   }, [profile]);
   usePolling(loadSummary, 30000);
 
+  // Bar Controller: how many orders are waiting (same "open" set as the queue's Open tab).
+  const [queueCount, setQueueCount] = useState<number | null>(null);
+  const loadQueueCount = useCallback(async () => {
+    if (profile !== 'bar_controller') return;
+    try {
+      setQueueCount((await barApi.queue()).length);
+    } catch {
+      // offline: keep the last count
+    }
+  }, [profile]);
+  usePolling(loadQueueCount, 10000);
+
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 150 }]}>
       <Text style={styles.eyebrow}>Bar / Lounge</Text>
       <Text style={styles.title}>Hello, {name}</Text>
 
@@ -77,12 +89,6 @@ export default function BarHomeScreen() {
                 <Text style={styles.body}>{d.text}</Text>
               </View>
             ))}
-            <View style={styles.notice}>
-              <MaterialCommunityIcons name="rocket-launch-outline" size={16} color={C.accent} />
-              <Text style={[styles.body, { flex: 1 }]}>
-                Payments, balances and day close arrive in the next app updates.
-              </Text>
-            </View>
           </>
         ) : (
           <Text style={styles.body}>
@@ -92,7 +98,7 @@ export default function BarHomeScreen() {
         )}
       </View>
 
-      {/* Phase 2 actions */}
+      {/* Duty shortcuts */}
       {profile === 'bar_attendant' && summary && (
         <TouchableOpacity style={styles.owedCard} activeOpacity={0.85} onPress={() => navigation.navigate('BarCashier')}>
           <View style={{ flex: 1 }}>
@@ -116,7 +122,7 @@ export default function BarHomeScreen() {
       {profile === 'bar_controller' && (
         <>
           <View style={styles.actions}>
-            <ActionTile icon="inbox-arrow-down" label="Order queue" primary onPress={() => navigation.navigate('BarOrders', { mode: 'queue' })} />
+            <ActionTile icon="inbox-arrow-down" label={queueCount != null ? `Order queue (${queueCount})` : 'Order queue'} primary onPress={() => navigation.navigate('BarOrders', { mode: 'queue' })} />
             <ActionTile icon="cash-plus" label="Record money" onPress={() => navigation.navigate('BarRemittance')} />
           </View>
           <View style={styles.actions}>
@@ -172,7 +178,6 @@ const styles = StyleSheet.create({
   muted: { fontSize: 12, color: C.muted },
   body: { fontSize: 14, lineHeight: 20, color: C.ink, flexShrink: 1 },
   dutyRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  notice: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, padding: 10, borderRadius: 12, backgroundColor: C.violetBg },
   cta: { marginTop: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: 14, backgroundColor: C.accent },
   ctaText: { fontSize: 15, fontWeight: '700', color: C.accentFg },
 });

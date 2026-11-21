@@ -15,6 +15,7 @@ import {
 import { RootState } from '../redux/store';
 import { barApi, barErrorMessage } from '../services/barApi';
 import { usePolling } from '../hooks/usePolling';
+import { useBarCache } from '../hooks/useBarCache';
 import { useBusinessMode } from '../hooks/useBusinessMode';
 import { BarStatusBadge, ReasonDialog } from '../components/bar/BarBits';
 import { C, naira } from '../theme';
@@ -44,11 +45,14 @@ export default function BarOrderDetailScreen() {
   const isAdmin = me?.role === 'admin' || !!me?.is_super_admin;
   const isSupervisor = isAdmin || me?.role === 'manager';
 
-  const [order, setOrder] = useState<BarOrder | null>(null);
+  // Opens with the order the list already had (or the last copy seen), then refreshes.
+  const [order, setOrder] = useBarCache<BarOrder | null>(`order:${id}`, route.params?.preview ?? null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<Dialog>(null);
-  const [release, setRelease] = useState<Record<string, number>>({});
+  const [release, setRelease] = useState<Record<string, number>>(() =>
+    order ? Object.fromEntries(order.items.map((it) => [it.id, it.quantity_fulfilled ?? it.quantity_requested])) : {}
+  );
   const [payMethod, setPayMethod] = useState<BarPaymentMethod | null>(null);
   const [split, setSplit] = useState({ cash: '', transfer: '', card: '' });
   const [payRef, setPayRef] = useState('');
@@ -69,7 +73,7 @@ export default function BarOrderDetailScreen() {
     } catch (e) {
       setError(barErrorMessage(e, 'Could not load this order.'));
     }
-  }, [id]);
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   usePolling(load, 5000);
 

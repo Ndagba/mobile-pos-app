@@ -37,6 +37,7 @@ import NotificationService, {
 } from '../services/NotificationService';
 import { C, R, S } from '../theme';
 import { useResponsive, responsiveSpacing, responsiveFontSize } from '../utils/responsiveDesign';
+import { clearBarCache } from '../hooks/useBarCache';
 
 // ─── Constants ────────────────────────────────────────────────
 const BIZ_NAME_KEY = '@pos_business_name';
@@ -1042,6 +1043,7 @@ export default function SettingsScreen() {
               ]);
             }
           } catch {}
+          clearBarCache();
           dispatch(logout());
         },
       },

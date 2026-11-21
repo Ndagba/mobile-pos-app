@@ -2,13 +2,18 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import type { BarOrder } from '@jaypos/shared';
+import { useSelector } from 'react-redux';
+import { barOrderAmount, reportRangePresets, type BarOrder } from '@jaypos/shared';
+
+import { RootState } from '../redux/store';
 
 import { barApi, barErrorMessage } from '../services/barApi';
 import { usePolling } from '../hooks/usePolling';
+import { useBarCache } from '../hooks/useBarCache';
+import { barBusinessToday } from '../utils/barBusinessDate';
 import { useBusinessMode } from '../hooks/useBusinessMode';
-import { BarOrderCard } from '../components/bar/BarBits';
-import { C } from '../theme';
+import { BarOrderCard, DayPicker } from '../components/bar/BarBits';
+import { C, naira } from '../theme';
 import {
   OfflineBanner, PurchasingHeader as ScreenHeader, useIsOnline,
 } from '../components/purchasing/PurchasingBits';
@@ -26,6 +31,11 @@ import {
  * Closed = finished WITHOUT a sale: cancelled by the Attendant, rejected by the
  * Bar Controller, or reversed by a manager. Closed is history only; there is no
  * "close" action, orders land there by those three routes.
+ *
+ * Attendant (mode 'mine') Released / Closed tabs have a business-date filter
+ * (presets + From/To, default Today), filtered server-side on submission time.
+ * Each tab keeps its last list in memory, so switching tabs or coming back
+ * shows it at once while it refreshes.
  */
 
 type Mode = 'mine' | 'queue';
@@ -53,7 +63,20 @@ export default function BarOrdersScreen() {
       ? [...TABS, { key: 'reversals', label: 'Reversals', status: 'reversal_requested' }]
       : TABS;
   const [tab, setTab] = useState<string>(route.params?.tab ?? 'open');
-  const [orders, setOrders] = useState<BarOrder[] | null>(null);
+
+  // Date filter (Attendant history tabs only). Business "today" from store settings.
+  const settings = useSelector((s: RootState) => s.settings.settings);
+  const today = barBusinessToday({ cutoffHour: settings?.bar_business_day_cutoff_hour, timeZone: settings?.bar_timezone });
+  const [range, setRange] = useState<{ from: string; to: string } | null>(null);
+  const from = range?.from ?? today;
+  const to = range?.to ?? today;
+  const dated = mode === 'mine' && (tab === 'released' || tab === 'closed');
+  const presets = useMemo(() => reportRangePresets(today), [today]);
+
+  const [orders, setOrders] = useBarCache<BarOrder[] | null>(
+    `orders:${mode}:${tab}${dated ? `:${from}:${to}` : ''}`,
+    null
+  );
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [reloading, setReloading] = useState(false);
@@ -69,7 +92,7 @@ export default function BarOrdersScreen() {
       const list =
         mode === 'queue'
           ? await barApi.queue(status)
-          : await barApi.mine(status ?? 'submitted,accepted');
+          : await barApi.mine(status ?? 'submitted,accepted', dated ? { from, to } : {});
       setOrders(list);
       setError(null);
       if (mode === 'queue' && list.length) {
@@ -88,7 +111,7 @@ export default function BarOrdersScreen() {
     } catch (e) {
       setError(barErrorMessage(e, 'Could not load orders.'));
     }
-  }, [mode, status]);
+  }, [mode, status, dated, from, to, setOrders]);
 
   usePolling(load, mode === 'queue' ? 5000 : 10000);
 
@@ -160,10 +183,7 @@ export default function BarOrdersScreen() {
             {tabs.map((t) => (
               <TouchableOpacity
                 key={t.key}
-                onPress={() => {
-                  setTab(t.key);
-                  setOrders(null);
-                }}
+                onPress={() => setTab(t.key)}
                 style={[styles.tab, tab === t.key && styles.tabActive]}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: tab === t.key }}
@@ -199,6 +219,42 @@ export default function BarOrdersScreen() {
               })}
             </ScrollView>
           )}
+          {dated && (
+            <View style={styles.dateBox}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+                {presets.map((p) => {
+                  const active = from === p.from && to === p.to;
+                  return (
+                    <TouchableOpacity
+                      key={p.key}
+                      onPress={() => setRange({ from: p.from, to: p.to })}
+                      style={[styles.filterChip, active && styles.filterChipActive]}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: active }}
+                    >
+                      <Text style={[styles.filterText, active && { color: C.accentFg }]}>{p.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+              <View style={styles.rangeRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rangeLabel}>From</Text>
+                  <DayPicker date={from} today={to} onChange={(d) => setRange({ from: d, to })} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rangeLabel}>To</Text>
+                  <DayPicker date={to} today={today} onChange={(d) => setRange({ from: d < from ? d : from, to: d })} />
+                </View>
+              </View>
+              {shown && shown.length > 0 && (
+                <Text style={styles.rangeSummary}>
+                  {shown.length} order{shown.length === 1 ? '' : 's'}
+                  {tab === 'released' ? ` · ${naira(shown.reduce((a, o) => a + barOrderAmount(o), 0))}` : ''}
+                </Text>
+              )}
+            </View>
+          )}
           {!!hint && <Text style={styles.hint}>{hint}</Text>}
           {!!error && <Text style={styles.error}>{error}</Text>}
           <FlatList
@@ -215,6 +271,8 @@ export default function BarOrdersScreen() {
                     ? mode === 'queue'
                       ? 'No orders waiting. New orders appear here automatically.'
                       : 'No open orders.'
+                    : dated
+                    ? 'No orders in this period.'
                     : 'Nothing here yet.'}
                 </Text>
               )
@@ -223,7 +281,7 @@ export default function BarOrdersScreen() {
               <BarOrderCard
                 order={item}
                 showAttendant={mode === 'queue'}
-                onPress={() => navigation.navigate('BarOrderDetail', { id: item.id })}
+                onPress={() => navigation.navigate('BarOrderDetail', { id: item.id, preview: item })}
               />
             )}
           />
@@ -250,6 +308,10 @@ const styles = StyleSheet.create({
   filterChip: { maxWidth: 160, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: C.border, backgroundColor: C.card },
   filterChipActive: { backgroundColor: C.accent, borderColor: C.accent },
   filterText: { fontSize: 12, fontWeight: '700', color: C.ink },
+  dateBox: { paddingBottom: 6 },
+  rangeRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16 },
+  rangeLabel: { fontSize: 11, fontWeight: '700', color: C.muted, textAlign: 'center', textTransform: 'uppercase' },
+  rangeSummary: { fontSize: 13, fontWeight: '700', color: C.ink, textAlign: 'center', paddingTop: 4 },
   hint: { fontSize: 12, lineHeight: 17, color: C.muted, paddingHorizontal: 16, marginBottom: 8 },
   newBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, backgroundColor: C.accent },
   newText: { color: C.accentFg, fontWeight: '700', fontSize: 13 },

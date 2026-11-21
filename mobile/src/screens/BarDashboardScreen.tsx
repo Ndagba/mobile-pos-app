@@ -12,6 +12,7 @@ import {
 
 import { barApi, barErrorMessage } from '../services/barApi';
 import { usePolling } from '../hooks/usePolling';
+import { useBarCache } from '../hooks/useBarCache';
 import { useBusinessMode } from '../hooks/useBusinessMode';
 import { DayPicker, Kpi, MixRows } from '../components/bar/BarBits';
 import { C, naira } from '../theme';
@@ -30,7 +31,7 @@ export default function BarDashboardScreen() {
   const online = useIsOnline();
   const { can } = useBusinessMode();
   const [date, setDate] = useState<string | undefined>(undefined);
-  const [data, setData] = useState<BarDashboard | null>(null);
+  const [data, setData] = useBarCache<BarDashboard | null>(`dashboard:${date ?? 'today'}`, null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -41,7 +42,7 @@ export default function BarDashboardScreen() {
     } catch (e) {
       setError(barErrorMessage(e, 'Could not load the dashboard.'));
     }
-  }, [date]);
+  }, [date, setData]);
 
   usePolling(load, 15000);
 

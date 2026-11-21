@@ -12,6 +12,7 @@ import {
 
 import { barApi, barErrorDetails, barErrorMessage } from '../services/barApi';
 import { usePolling } from '../hooks/usePolling';
+import { useBarCache } from '../hooks/useBarCache';
 import { useBusinessMode } from '../hooks/useBusinessMode';
 import { DayPicker, Kpi, MixRows } from '../components/bar/BarBits';
 import { C, naira } from '../theme';
@@ -33,7 +34,7 @@ export default function BarDayCloseScreen() {
   const online = useIsOnline();
   const { can } = useBusinessMode();
   const [date, setDate] = useState<string | undefined>(undefined);
-  const [data, setData] = useState<DayClosePreview | null>(null);
+  const [data, setData] = useBarCache<DayClosePreview | null>(`dayclose:${date ?? 'today'}`, null);
   const [error, setError] = useState<string | null>(null);
   const [counted, setCounted] = useState('');
   const [reason, setReason] = useState('');
@@ -48,7 +49,7 @@ export default function BarDayCloseScreen() {
     } catch (e) {
       setError(barErrorMessage(e, 'Could not load your day.'));
     }
-  }, [date]);
+  }, [date, setData]);
   usePolling(load, 30000);
 
   const f = data?.figures;

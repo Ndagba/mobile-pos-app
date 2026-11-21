@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/errorHandler';
+import { TtlCache } from '../utils/ttlCache';
 import {
   BusinessMode,
   OperationalProfile,
@@ -28,12 +29,17 @@ interface Actor {
   is_super_admin?: boolean;
 }
 
+/** Store mode changes are rare (and locked once sales exist): cache 15 s, cleared on change. */
+const storeModeCache = new TtlCache<BusinessMode>(15_000);
+
 export class BusinessModeService {
   /** The store's current mode (fresh from the DB — never trust a token for this). */
   static async getStoreMode(storeId: string | null | undefined): Promise<BusinessMode> {
     if (!storeId) return 'retail';
-    const store = await prisma.store.findUnique({ where: { id: storeId }, select: { business_mode: true } });
-    return normalizeBusinessMode(store?.business_mode);
+    return storeModeCache.get(storeId, async () => {
+      const store = await prisma.store.findUnique({ where: { id: storeId }, select: { business_mode: true } });
+      return normalizeBusinessMode(store?.business_mode);
+    });
   }
 
   /** Locked once any sale exists for the store. */
@@ -105,6 +111,7 @@ export class BusinessModeService {
         },
       });
     });
+    storeModeCache.invalidate(storeId);
 
     return { business_mode: mode, business_mode_locked: locked, changed: true };
   }

@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { catchAsync, AppError } from '../../utils/errorHandler';
 import { BusinessModeService } from '../../services/BusinessModeService';
+import { invalidateBarDaySettings } from '../../services/BarLedgerService';
 
 /** Settings row + the store's business mode and whether the mode is locked (Phase 1). */
 async function withModeState(storeId: string, settings: any) {
@@ -132,6 +133,7 @@ router.patch(
       update: data,
       create: { store_id: storeId, ...data }
     });
+    invalidateBarDaySettings(storeId);
 
     res.json({
       status: 'success',

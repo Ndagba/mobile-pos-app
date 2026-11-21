@@ -14,7 +14,9 @@ import { BarCapability, BusinessMode, canUseRetailCheckout, hasBarCapability } f
 async function loadContext(req: Request) {
   const user = (req as any).user;
   if (!user) throw new AppError(401, 'Authentication required');
-  const ctx = await BusinessModeService.getUserModeContext(user.userId, user.storeId);
+  // Read once per request: the /bar router guard and the per-route capability
+  // guard both need it, and it is already fresh from the DB for this request.
+  const ctx = (req as any).modeContext ?? (await BusinessModeService.getUserModeContext(user.userId, user.storeId));
   (req as any).modeContext = ctx;
   return {
     ctx,

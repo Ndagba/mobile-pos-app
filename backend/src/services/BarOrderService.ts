@@ -4,8 +4,8 @@ import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/errorHandler';
 import { logger } from '../utils/logger';
 import { TransactionService } from './TransactionService';
-import { businessDateToDbDate, getBusinessDate } from '../utils/businessDate';
-import { appendLedgerEntry } from './BarLedgerService';
+import { businessDateToDbDate, getBusinessDate, getBusinessDayRange } from '../utils/businessDate';
+import { appendLedgerEntry, storeBusinessDay } from './BarLedgerService';
 import { assertDayOpen, findClosedDay } from './barDayGuard';
 
 /**
@@ -202,17 +202,48 @@ export class BarOrderService {
     return order;
   }
 
-  static async listMine(actor: BarActor, opts: { status?: string[]; limit?: number } = {}) {
+  /**
+   * An Attendant's own orders. Optional `from`/`to` are BUSINESS dates
+   * (YYYY-MM-DD, store cutoff + timezone) matched on when the order was
+   * submitted — closed orders never get a business_date, so submitted_at is
+   * the one time every order has.
+   */
+  static async listMine(
+    actor: BarActor,
+    opts: { status?: string[]; limit?: number; from?: unknown; to?: unknown } = {}
+  ) {
+    const storeId = actor.storeId ?? '__none__';
+    const submitted = opts.from || opts.to ? await this.submittedRange(storeId, opts.from, opts.to) : undefined;
     return prisma.barOrder.findMany({
       where: {
-        store_id: actor.storeId ?? '__none__',
+        store_id: storeId,
         initiated_by_user_id: actor.userId, // server-side scope — no user id is ever taken from the request
         ...(opts.status?.length ? { status: { in: opts.status } } : {}),
+        ...(submitted ? { submitted_at: submitted } : {}),
       },
       include: ORDER_INCLUDE,
       orderBy: { submitted_at: 'desc' },
-      take: Math.min(Math.max(opts.limit ?? 50, 1), 200),
+      // A dated history view may need more than the default page.
+      take: Math.min(Math.max(opts.limit ?? (submitted ? 200 : 50), 1), 200),
     });
+  }
+
+  /** Business-date range → [start of `from`, start of the day after `to`) instants. */
+  static async submittedRange(storeId: string, fromRaw: unknown, toRaw: unknown) {
+    const valid = (v: unknown) =>
+      typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v)) ? v : undefined;
+    const day = await storeBusinessDay(storeId);
+    if ((fromRaw && !valid(fromRaw)) || (toRaw && !valid(toRaw))) {
+      throw new AppError(400, 'from/to must be dates like 2026-11-21');
+    }
+    const to = valid(toRaw) ?? day.today;
+    const from = valid(fromRaw) ?? to;
+    if (from > to) throw new AppError(400, '“from” must be on or before “to”');
+    if ((Date.parse(to) - Date.parse(from)) / 86400000 + 1 > 366) {
+      throw new AppError(400, 'Pick at most 366 days');
+    }
+    const tz = { cutoffHour: day.cutoffHour, timeZone: day.timeZone };
+    return { gte: getBusinessDayRange(from, tz).start, lt: getBusinessDayRange(to, tz).end };
   }
 
   static async listQueue(actor: BarActor, branchIds: string[], opts: { status?: string[]; limit?: number } = {}) {

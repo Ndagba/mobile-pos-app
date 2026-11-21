@@ -80,15 +80,18 @@ export const barApi = {
     items: { product_id: string; quantity: number }[];
     table_label?: string;
     notes?: string;
-    customer_payment_method: Exclude<BarPaymentMethod, 'split'>;
+    /** Optional: the server records 'cash' until it is declared after release, unless
+     *  the store requires it up front (bar_require_payment_declaration). */
+    customer_payment_method?: Exclude<BarPaymentMethod, 'split'>;
     customer_payment_ref?: string;
   }): Promise<BarOrder> {
     requireOnline();
     return asOrder(await ApiClient.post('/bar/orders', body));
   },
 
-  async mine(status?: string): Promise<BarOrder[]> {
-    return asList(await ApiClient.get(`/bar/orders/mine${query({ status })}`));
+  /** Own orders; `from`/`to` are business dates (YYYY-MM-DD) matched on submission time. */
+  async mine(status?: string, range: { from?: string; to?: string } = {}): Promise<BarOrder[]> {
+    return asList(await ApiClient.get(`/bar/orders/mine${query({ status, from: range.from, to: range.to })}`));
   },
 
   async queue(status?: string): Promise<BarOrder[]> {
@@ -152,6 +155,39 @@ export const barApi = {
   // ── Balances (Phase 3): Attendant = own; Controller/manager = anyone in scope ──
   async mySummary(date?: string): Promise<CashierSummary> {
     return asObject(await ApiClient.get(`/bar/me/summary${query({ date })}`), 'outstanding_now');
+  },
+
+  /**
+   * Everything "My balance" shows, in one round trip. Falls back to the five
+   * separate calls when the server predates GET /bar/me/overview (404).
+   */
+  async myOverview(date?: string): Promise<{
+    summary: CashierSummary;
+    remittances: CashierRemittance[];
+    ledger: LedgerEntry[];
+    damages: DamageList | null;
+    commission: MyCommissionLine[];
+  }> {
+    try {
+      const res: any = await ApiClient.get(`/bar/me/overview${query({ date })}`);
+      return {
+        summary: asObject<CashierSummary>(res?.summary, 'outstanding_now'),
+        remittances: asList(res?.remittances),
+        ledger: asList(res?.ledger),
+        damages: res?.damages && typeof res.damages === 'object' && 'totals' in res.damages ? res.damages : null,
+        commission: asList(res?.commission),
+      };
+    } catch (e: any) {
+      if (e?.response?.status !== 404) throw e;
+      const [summary, remittances, ledger, damages, commission] = await Promise.all([
+        this.mySummary(date),
+        this.myRemittances(),
+        this.myLedger(),
+        this.myDamages().catch(() => null),
+        this.myCommission().catch(() => [] as MyCommissionLine[]),
+      ]);
+      return { summary, remittances, ledger, damages, commission };
+    }
   },
 
   async myLedger(): Promise<LedgerEntry[]> {

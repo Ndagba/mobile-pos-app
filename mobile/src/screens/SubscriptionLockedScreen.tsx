@@ -15,6 +15,7 @@ import { logout } from '../redux/slices/authSlice';
 import { setSubscriptionAccess } from '../redux/slices/subscriptionSlice';
 import ApiClient from '../services/ApiClient';
 import { C, S, R } from '../theme';
+import { clearBarCache } from '../hooks/useBarCache';
 
 const SubscriptionLockedScreen = ({ navigation }: any) => {
   const dispatch = useDispatch();
@@ -38,6 +39,7 @@ const SubscriptionLockedScreen = ({ navigation }: any) => {
     } catch {
       // ignore — dispatching logout still clears in-memory auth state
     }
+    clearBarCache();
     dispatch(logout());
   };
 

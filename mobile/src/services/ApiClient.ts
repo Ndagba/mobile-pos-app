@@ -92,8 +92,13 @@ class ApiClient {
     try {
       const response = await this.axiosInstance.get(url, config);
       const data = response.data.data;
-      if (!url.includes('/auth/')) {
-        await this.cacheData(url, data);
+      // Save for offline use WITHOUT holding up the screen: the write to phone
+      // storage used to be awaited before the data was returned. Bar lists are
+      // online-only and polled every few seconds, so they are not stored at all
+      // (that was a storage write per poll); bar screens keep their last result
+      // in memory instead (hooks/useBarCache).
+      if (!url.includes('/auth/') && !url.startsWith('/bar/')) {
+        this.cacheData(url, data);
       }
       return data;
     } catch (error) {

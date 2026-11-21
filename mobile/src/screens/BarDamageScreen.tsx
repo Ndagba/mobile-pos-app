@@ -15,6 +15,7 @@ import {
 import ApiClient from '../services/ApiClient';
 import { barApi, barErrorMessage } from '../services/barApi';
 import { usePolling } from '../hooks/usePolling';
+import { useBarCache } from '../hooks/useBarCache';
 import { useBusinessMode } from '../hooks/useBusinessMode';
 import { ReasonDialog } from '../components/bar/BarBits';
 import { C, naira } from '../theme';
@@ -39,8 +40,8 @@ export default function BarDamageScreen() {
   const online = useIsOnline();
   const { can } = useBusinessMode();
 
-  const [products, setProducts] = useState<Product[]>([]);
-  const [people, setPeople] = useState<BarDashboardRow[]>([]);
+  const [products, setProducts] = useBarCache<Product[]>('damage:products', []);
+  const [people, setPeople] = useBarCache<BarDashboardRow[]>('damage:people', []);
   const [search, setSearch] = useState('');
   const [productId, setProductId] = useState<string | null>(null);
   const [qty, setQty] = useState(1);
@@ -49,7 +50,7 @@ export default function BarDamageScreen() {
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [clientRef, setClientRef] = useState<string | null>(null);
-  const [list, setList] = useState<DamageList | null>(null);
+  const [list, setList] = useBarCache<DamageList | null>('damage:list', null);
   const [reverseId, setReverseId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -75,7 +76,7 @@ export default function BarDamageScreen() {
     } catch {
       // keep last
     }
-  }, []);
+  }, [setList]);
   usePolling(load, 30000);
 
   const matches = useMemo(() => {

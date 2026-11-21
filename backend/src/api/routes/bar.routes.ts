@@ -84,6 +84,8 @@ router.get(
     const orders = await BarOrderService.listMine(actorOf(req), {
       status: statusFilter(req.query.status),
       limit: Number(req.query.limit) || undefined,
+      from: req.query.from,
+      to: req.query.to,
     });
     res.json({ status: 'success', data: orders.map(serializeOrder) });
   })
@@ -551,6 +553,24 @@ router.get(
   requireBarCapability('bar.ledger.view_own'),
   catchAsync(async (req: Request, res: Response) => {
     res.json({ status: 'success', data: await BarCommissionService.mine(actorOf(req)) });
+  })
+);
+
+// Everything the Attendant's "My balance" screen needs, in ONE round trip
+// (summary for ?date, hand-overs, ledger, damages, commission) — mobile data is slow.
+router.get(
+  '/me/overview',
+  requireBarCapability('bar.ledger.view_own'),
+  catchAsync(async (req: Request, res: Response) => {
+    const a = actorOf(req);
+    const [summary, remittances, ledger, damages, commission] = await Promise.all([
+      BarLedgerService.cashierSummary(a.storeId, a.userId, req.query.date),
+      BarLedgerService.remittances(a.storeId, { cashierId: a.userId }),
+      BarLedgerService.entries(a.storeId, a.userId),
+      BarDamageService.list(a.storeId, { responsibleId: a.userId }),
+      BarCommissionService.mine(actorOf(req)),
+    ]);
+    res.json({ status: 'success', data: { summary, remittances, ledger, damages, commission } });
   })
 );
 

@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,6 +10,7 @@ import { RootState } from '../redux/store';
 import { useBusinessMode } from '../hooks/useBusinessMode';
 import { barApi } from '../services/barApi';
 import { usePolling } from '../hooks/usePolling';
+import { useBarCache } from '../hooks/useBarCache';
 import { C, naira } from '../theme';
 
 /**
@@ -40,7 +41,7 @@ export default function BarHomeScreen() {
   const name = user?.first_name || 'there';
 
   // Attendant headline (Phase 3): what they owe right now, refreshed while open.
-  const [summary, setSummary] = useState<CashierSummary | null>(null);
+  const [summary, setSummary] = useBarCache<CashierSummary | null>('home:summary', null);
   const loadSummary = useCallback(async () => {
     if (profile !== 'bar_attendant') return;
     try {
@@ -48,11 +49,11 @@ export default function BarHomeScreen() {
     } catch {
       // offline / not yet available — keep the last figure
     }
-  }, [profile]);
+  }, [profile, setSummary]);
   usePolling(loadSummary, 30000);
 
   // Bar Controller: how many orders are waiting (same "open" set as the queue's Open tab).
-  const [queueCount, setQueueCount] = useState<number | null>(null);
+  const [queueCount, setQueueCount] = useBarCache<number | null>('home:queueCount', null);
   const loadQueueCount = useCallback(async () => {
     if (profile !== 'bar_controller') return;
     try {
@@ -60,13 +61,49 @@ export default function BarHomeScreen() {
     } catch {
       // offline: keep the last count
     }
-  }, [profile]);
+  }, [profile, setQueueCount]);
   usePolling(loadQueueCount, 10000);
 
+  // Refresh on demand (header button or pull down) — slow networks shouldn't
+  // have to wait for the next automatic refresh.
+  const [refreshing, setRefreshing] = useState(false);
+  const refresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await Promise.all([loadSummary(), loadQueueCount()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshing, loadSummary, loadQueueCount]);
+
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 150 }]}>
-      <Text style={styles.eyebrow}>Bar / Lounge</Text>
-      <Text style={styles.title}>Hello, {name}</Text>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 150 }]}
+      refreshControl={profile ? <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.accent} /> : undefined}
+    >
+      <View style={styles.headRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.eyebrow}>Bar / Lounge</Text>
+          <Text style={styles.title}>Hello, {name}</Text>
+        </View>
+        {!!profile && (
+          <TouchableOpacity
+            onPress={refresh}
+            disabled={refreshing}
+            style={styles.refreshBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Refresh"
+          >
+            {refreshing ? (
+              <ActivityIndicator size="small" color={C.accent} />
+            ) : (
+              <MaterialCommunityIcons name="refresh" size={22} color={C.ink} />
+            )}
+          </TouchableOpacity>
+        )}
+      </View>
 
       <View style={styles.card}>
         <View style={styles.badgeRow}>
@@ -162,6 +199,8 @@ function ActionTile({ icon, label, primary, onPress }: { icon: string; label: st
 }
 
 const styles = StyleSheet.create({
+  headRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  refreshBtn: { width: 44, height: 44, borderRadius: 999, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border, backgroundColor: C.card, marginTop: 4 },
   actions: { flexDirection: 'row', gap: 12, marginTop: 16 },
   owedCard: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16, padding: 16, borderRadius: 16, backgroundColor: C.card, borderWidth: 1, borderColor: C.border },
   owedValue: { fontSize: 30, fontWeight: '800', color: C.ink, fontVariant: ['tabular-nums'] },

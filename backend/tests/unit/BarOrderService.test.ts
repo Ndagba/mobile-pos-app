@@ -339,6 +339,25 @@ describe('reads are scoped server-side', () => {
     });
   });
 
+  it('listMine from/to filters on submitted_at by business day (cutoff 06:00 Lagos)', async () => {
+    mockPrisma.storeSetting.findUnique.mockResolvedValue(null); // defaults: 6 h cutoff, Africa/Lagos
+    mockPrisma.barOrder.findMany.mockResolvedValue([]);
+    await BarOrderService.listMine(attendant, { status: ['fulfilled'], from: '2026-11-20', to: '2026-11-21' });
+    const args = mockPrisma.barOrder.findMany.mock.calls[0][0];
+    expect(args.where.submitted_at).toEqual({
+      gte: new Date('2026-11-20T05:00:00.000Z'),
+      lt: new Date('2026-11-22T05:00:00.000Z'),
+    });
+    expect(args.where.initiated_by_user_id).toBe('att-1');
+    expect(args.take).toBe(200);
+  });
+
+  it('listMine rejects bad or reversed date ranges', async () => {
+    mockPrisma.storeSetting.findUnique.mockResolvedValue(null);
+    await expectError(BarOrderService.listMine(attendant, { from: '21-11-2026' }), 400);
+    await expectError(BarOrderService.listMine(attendant, { from: '2026-11-22', to: '2026-11-20' }), 400);
+  });
+
   it("getOrder: another attendant's order is 404; a controller in the branch can see it", async () => {
     await expectError(BarOrderService.getOrder(otherAttendant, 'ord-1', { canViewQueue: false, branchIds: BRANCHES }), 404);
     await BarOrderService.getOrder(controller, 'ord-1', { canViewQueue: true, branchIds: BRANCHES });

@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import cors from 'cors';
 import helmet from 'helmet';
+import { gzipJson } from './api/middleware/gzipJson.middleware';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import { logger } from './utils/logger';
@@ -116,6 +117,9 @@ app.use(limiter);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+// Compress JSON responses (> 1 KB) for clients that accept gzip — no new npm dependency.
+app.use(gzipJson);
 
 // Serve product image uploads static folder
 const uploadsDir = path.join(__dirname, '../uploads');

@@ -130,7 +130,7 @@ export default function BarNewOrderScreen() {
       setTable('');
       setClientRef(null); // next draft gets a fresh key
       const short = order.stock_warnings ?? [];
-      const go = () => navigation.replace('BarOrderDetail', { id: order.id });
+      const go = () => navigation.replace('BarOrderDetail', { id: order.id, preview: order });
       if (short.length) {
         Alert.alert(
           `Order ${order.order_number.split('-').pop()} sent`,

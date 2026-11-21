@@ -6,6 +6,7 @@ import { reportRangePresets, reportTableToCsv, type ReportCatalog, type ReportTa
 
 import { barApi, barErrorMessage } from '../services/barApi';
 import { DayPicker } from '../components/bar/BarBits';
+import { useBarCache } from '../hooks/useBarCache';
 import { C, naira } from '../theme';
 import {
   OfflineBanner, PurchasingHeader as ScreenHeader, useIsOnline,
@@ -25,12 +26,12 @@ export default function BarReportsScreen() {
 
 function Catalog() {
   const navigation = useNavigation<any>();
-  const [cat, setCat] = useState<ReportCatalog | null>(null);
+  const [cat, setCat] = useBarCache<ReportCatalog | null>('reports:catalog', null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     barApi.reportCatalog().then(setCat).catch((e) => setError(barErrorMessage(e, 'Could not load reports.')));
-  }, []);
+  }, [setCat]);
 
   return (
     <View style={styles.screen}>
@@ -74,7 +75,8 @@ function ReportView({ reportKey, title }: { reportKey: string; title?: string })
   const [today, setToday] = useState<string | null>(null);
   const [from, setFrom] = useState<string | undefined>(undefined);
   const [to, setTo] = useState<string | undefined>(undefined);
-  const [table, setTable] = useState<ReportTable | null>(null);
+  // Last copy of this report + range shows at once; a fresh one replaces it quietly.
+  const [table, setTable] = useBarCache<ReportTable | null>(`report:${reportKey}:${from ?? ''}:${to ?? ''}`, null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -90,13 +92,15 @@ function ReportView({ reportKey, title }: { reportKey: string; title?: string })
     } finally {
       setLoading(false);
     }
-  }, [reportKey, from, to, today]);
+  }, [reportKey, from, to, today, setTable]);
 
   useEffect(() => {
     load();
   }, [reportKey, from, to]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const presets = useMemo(() => (today ? reportRangePresets(today) : []), [today]);
+  // Before the first fresh load, the cached default-range report (to = today) gives "today".
+  const todayKnown = today ?? (from === undefined && to === undefined ? table?.to ?? null : null);
+  const presets = useMemo(() => (todayKnown ? reportRangePresets(todayKnown) : []), [todayKnown]);
   const single = reportKey === 'outstanding'; // "as of now" report: no range
 
   return (
@@ -119,10 +123,10 @@ function ReportView({ reportKey, title }: { reportKey: string; title?: string })
         }
       />
       {!online && <OfflineBanner message="You're offline. Reports need a connection." />}
-      <ScrollView contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.accent} />}>
+      <ScrollView contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={loading && !table} onRefresh={load} tintColor={C.accent} />}>
         {!!table?.description && <Text style={[styles.muted, { marginBottom: 8 }]}>{table.description}</Text>}
 
-        {!single && today && (
+        {!single && todayKnown && (
           <>
             <View style={styles.presets}>
               {presets.map((p) => {
@@ -142,7 +146,7 @@ function ReportView({ reportKey, title }: { reportKey: string; title?: string })
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.rangeLabel}>To</Text>
-                  <DayPicker date={table.to} today={today} onChange={setTo} />
+                  <DayPicker date={table.to} today={todayKnown} onChange={setTo} />
                 </View>
               </View>
             )}

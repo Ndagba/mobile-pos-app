@@ -11,6 +11,7 @@ import {
 
 import { barApi, barErrorMessage } from '../services/barApi';
 import { usePolling } from '../hooks/usePolling';
+import { useBarCache } from '../hooks/useBarCache';
 import { useBusinessMode } from '../hooks/useBusinessMode';
 import { ReasonDialog } from '../components/bar/BarBits';
 import { C, naira } from '../theme';
@@ -38,7 +39,7 @@ export default function BarHandoverScreen() {
   const online = useIsOnline();
   const { can } = useBusinessMode();
   const [tab, setTab] = useState('submitted');
-  const [rows, setRows] = useState<DayClose[] | null>(null);
+  const [rows, setRows] = useBarCache<DayClose[] | null>(`handovers:${tab}`, null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [ack, setAck] = useState<DayClose | null>(null);
@@ -55,7 +56,7 @@ export default function BarHandoverScreen() {
     } catch (e) {
       setError(barErrorMessage(e, 'Could not load handovers.'));
     }
-  }, [tab]);
+  }, [tab, setRows]);
   usePolling(load, 20000);
 
   const openAck = (c: DayClose) => {

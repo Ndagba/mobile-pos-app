@@ -18,6 +18,7 @@ import {
 
 import { barApi, barErrorMessage } from '../services/barApi';
 import { usePolling } from '../hooks/usePolling';
+import { useBarCache } from '../hooks/useBarCache';
 import { useBusinessMode } from '../hooks/useBusinessMode';
 import { DayPicker, Kpi, MixRows, ReasonDialog } from '../components/bar/BarBits';
 import { C, naira } from '../theme';
@@ -45,9 +46,11 @@ export default function BarCashierScreen() {
   const { can } = useBusinessMode();
 
   const [date, setDate] = useState<string | undefined>(undefined);
-  const [summary, setSummary] = useState<CashierSummary | null>(null);
-  const [remits, setRemits] = useState<CashierRemittance[]>([]);
-  const [ledger, setLedger] = useState<LedgerEntry[]>([]);
+  // Last figures for this person + day, shown at once while fresh ones load.
+  const ck = `cashier:${cashierId ?? 'me'}:${date ?? 'today'}`;
+  const [summary, setSummary] = useBarCache<CashierSummary | null>(`${ck}:summary`, null);
+  const [remits, setRemits] = useBarCache<CashierRemittance[]>(`${ck}:remits`, []);
+  const [ledger, setLedger] = useBarCache<LedgerEntry[]>(`${ck}:ledger`, []);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [reverseId, setReverseId] = useState<string | null>(null);
@@ -56,24 +59,34 @@ export default function BarCashierScreen() {
   const [moneyReason, setMoneyReason] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const [damages, setDamages] = useState<DamageList | null>(null);
-  const [commission, setCommission] = useState<MyCommissionLine[]>([]);
+  const [damages, setDamages] = useBarCache<DamageList | null>('cashier:me:damages', null);
+  const [commission, setCommission] = useBarCache<MyCommissionLine[]>('cashier:me:commission', []);
 
   const load = useCallback(async () => {
-    if (self) barApi.myDamages().then(setDamages).catch(() => {}); // information only (D24)
-    if (self) barApi.myCommission().then(setCommission).catch(() => {}); // Phase 5
     try {
-      const [s, r, l] = self
-        ? await Promise.all([barApi.mySummary(date), barApi.myRemittances(), barApi.myLedger()])
-        : await Promise.all([barApi.cashierSummary(cashierId!, date), barApi.cashierRemittances(cashierId!), barApi.cashierLedger(cashierId!)]);
-      setSummary(s);
-      setRemits(r);
-      setLedger(l);
+      if (self) {
+        // One round trip for the whole screen (summary, hand-overs, ledger, damages, commission).
+        const o = await barApi.myOverview(date);
+        setSummary(o.summary);
+        setRemits(o.remittances);
+        setLedger(o.ledger);
+        if (o.damages) setDamages(o.damages); // information only (D24)
+        setCommission(o.commission); // Phase 5
+      } else {
+        const [s, r, l] = await Promise.all([
+          barApi.cashierSummary(cashierId!, date),
+          barApi.cashierRemittances(cashierId!),
+          barApi.cashierLedger(cashierId!),
+        ]);
+        setSummary(s);
+        setRemits(r);
+        setLedger(l);
+      }
       setError(null);
     } catch (e) {
       setError(barErrorMessage(e, 'Could not load the balance.'));
     }
-  }, [self, cashierId, date]);
+  }, [self, cashierId, date, setSummary, setRemits, setLedger, setDamages, setCommission]);
 
   usePolling(load, 15000);
 

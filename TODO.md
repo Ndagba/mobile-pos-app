@@ -120,6 +120,13 @@ Approved 2026‑09‑07 ("Approve & build 4B"). Confirmed decisions: AP invoice 
 
 ---
 
+## Bar / Lounge mobile speed + filters  `[~]`  built 2026‑11‑22; prod deploy + on-phone check pending
+- [x] Backend: gzip for JSON > 1 KB (Node zlib, no new npm package), mode/profile lookup once per request, 15 s cache for store mode + bar day settings (cleared on change), `GET /v1/bar/me/overview` (My balance in one call), `from`/`to` business dates on `GET /v1/bar/orders/mine` (matched on `submitted_at`).
+- [x] Mobile: GET responses no longer wait on AsyncStorage; `/bar/*` responses are not stored; bar screens show their last result from memory (`hooks/useBarCache`, per user, cleared on logout); Attendant date filter on Released/Closed; Bar Controller home refresh button + pull-to-refresh.
+- [ ] Deploy backend `dist/` to Opalstack (no migration, no `package.json` change). The mobile app falls back to the old calls if `/me/overview` is missing.
+- [ ] Check load times on a real phone against prod (server `duration_ms` is already in the request log).
+- [ ] Optional, only if timings still show slow queries: composite indexes on `Transaction(store_id, business_date)` for bar sales and `BarOrder(store_id, initiated_by_user_id, submitted_at)` (needs a migration).
+
 ## Docs to keep current (describe *actual* implementation)
 - [-] ~~`DESKTOP_IMPLEMENTATION_AUDIT.md`~~ (skipped by request; facts live in `CLAUDE.md`)
 - [ ] `DESKTOP_ARCHITECTURE.md`

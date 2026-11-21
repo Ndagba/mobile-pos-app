@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/errorHandler';
 import { businessDateToDbDate, getBusinessDate } from '../utils/businessDate';
 import { assertDayOpen } from './barDayGuard';
+import { TtlCache } from '../utils/ttlCache';
 
 /**
  * Attendant ledger + remittances (Bar/Lounge planning Phase 3).
@@ -53,11 +54,21 @@ const n = (d: Prisma.Decimal | number | null | undefined) => (d === null || d ==
 const isSupervisor = (a: LedgerActor) => a.role === 'admin' || a.role === 'manager' || !!a.is_super_admin;
 const isAdmin = (a: LedgerActor) => a.role === 'admin' || !!a.is_super_admin;
 
+/** Bar day settings are read by nearly every /bar request: cache 15 s, cleared on a settings save. */
+const barDaySettingsCache = new TtlCache<{
+  bar_business_day_cutoff_hour: number | null;
+  bar_timezone: string | null;
+  bar_allow_backdated_remittance: boolean | null;
+} | null>(15_000);
+export const invalidateBarDaySettings = (storeId: string) => barDaySettingsCache.invalidate(storeId);
+
 export async function storeBusinessDay(storeId: string) {
-  const s = await prisma.storeSetting.findUnique({
-    where: { store_id: storeId },
-    select: { bar_business_day_cutoff_hour: true, bar_timezone: true, bar_allow_backdated_remittance: true },
-  });
+  const s = await barDaySettingsCache.get(storeId, () =>
+    prisma.storeSetting.findUnique({
+      where: { store_id: storeId },
+      select: { bar_business_day_cutoff_hour: true, bar_timezone: true, bar_allow_backdated_remittance: true },
+    })
+  );
   const opts = { cutoffHour: s?.bar_business_day_cutoff_hour ?? 6, timeZone: s?.bar_timezone ?? 'Africa/Lagos' };
   return { ...opts, today: getBusinessDate(new Date(), opts), allowBackdate: !!s?.bar_allow_backdated_remittance };
 }
